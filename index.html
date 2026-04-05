@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Variable Tetris</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0c0c1e;
+  color: #d8d8f0;
+  font-family: 'Courier New', Courier, monospace;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 12px 40px;
+  gap: 14px;
+}
+
+h1 {
+  font-size: clamp(1.3rem, 4vw, 2rem);
+  color: #8080ff;
+  text-shadow: 0 0 22px #8080ff88;
+  letter-spacing: 3px;
+  margin-top: 4px;
+}
+
+.subtitle {
+  color: #6868a0;
+  font-size: 0.82rem;
+  text-align: center;
+  max-width: 520px;
+}
+
+.controls-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.controls-row label { color: #9090c0; font-size: 0.88rem; }
+
+select, button {
+  background: #13132a;
+  color: #d8d8f0;
+  border: 1px solid #4040a0;
+  border-radius: 5px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+select:hover, button:hover,
+select:focus, button:focus {
+  background: #1e1e3e;
+  border-color: #8080ff;
+  outline: none;
+}
+
+.game-area {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+#board {
+  border: 1px solid #30307044;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 136px;
+  flex-shrink: 0;
+}
+
+.box {
+  background: #090918;
+  border: 1px solid #252550;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.box-label {
+  font-size: 0.62rem;
+  color: #6868cc;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  margin-bottom: 5px;
+}
+
+.box-val {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+}
+
+.box-sub {
+  font-size: 0.72rem;
+  color: #555588;
+  margin-top: 3px;
+}
+
+#next-canvas { display: block; margin: 0 auto; }
+
+.key-help {
+  font-size: 0.7rem;
+  color: #484878;
+  line-height: 1.9;
+}
+.key-help kbd { color: #8888cc; font-family: inherit; }
+</style>
+</head>
+<body>
+
+<h1>VARIABLE TETRIS</h1>
+<p class="subtitle">Standard Tetris uses n&thinsp;=&thinsp;4 blocks per piece. Change n to play with differently-sized pieces!</p>
+
+<div class="controls-row">
+  <label for="nSel">Piece size n =</label>
+  <select id="nSel">
+    <option value="1">1 &mdash; Monomino &nbsp; (1 piece type)</option>
+    <option value="2">2 &mdash; Domino &nbsp;&nbsp;&nbsp;&nbsp; (1 piece type)</option>
+    <option value="3">3 &mdash; Tromino &nbsp;&nbsp;&nbsp; (2 piece types)</option>
+    <option value="4" selected>4 &mdash; Tetromino &nbsp;(5 piece types) &#9733; Classic</option>
+    <option value="5">5 &mdash; Pentomino &nbsp;(12 piece types)</option>
+    <option value="6">6 &mdash; Hexomino &nbsp;&nbsp;(35 piece types)</option>
+    <option value="7">7 &mdash; Heptomino &nbsp;(108 piece types)</option>
+  </select>
+  <button id="newBtn">&#9654; New Game</button>
+</div>
+
+<div class="game-area">
+  <canvas id="board"></canvas>
+
+  <div class="sidebar">
+    <div class="box">
+      <div class="box-label">Next</div>
+      <canvas id="next-canvas" width="112" height="112"></canvas>
+    </div>
+    <div class="box">
+      <div class="box-label">Score</div>
+      <div class="box-val" id="el-score">0</div>
+    </div>
+    <div class="box">
+      <div class="box-label">Lines</div>
+      <div class="box-val" id="el-lines">0</div>
+      <div class="box-sub" id="el-next-lv"></div>
+    </div>
+    <div class="box">
+      <div class="box-label">Level</div>
+      <div class="box-val" id="el-level">1</div>
+    </div>
+    <div class="box">
+      <div class="box-label">Mode</div>
+      <div class="box-sub" id="el-mode">&mdash;</div>
+    </div>
+    <div class="box">
+      <div class="box-label">Keys</div>
+      <div class="key-help">
+        <kbd>&larr; &rarr;</kbd> Move<br>
+        <kbd>&uarr;</kbd> / <kbd>X</kbd> Rotate &#8635;<br>
+        <kbd>Z</kbd> Rotate &#8634;<br>
+        <kbd>&darr;</kbd> Soft drop<br>
+        <kbd>Space</kbd> Hard drop<br>
+        <kbd>P</kbd> Pause
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════
+//  FREE POLYOMINO GENERATION
+// ═══════════════════════════════════════════════════════
+
+/** Translate cells so min-x = 0, min-y = 0; sort lexicographically. */
+function norm(cells) {
+  let mnX = Infinity, mnY = Infinity;
+  for (const [x, y] of cells) {
+    if (x < mnX) mnX = x;
+    if (y < mnY) mnY = y;
+  }
+  const s = cells.map(([x, y]) => [x - mnX, y - mnY]);
+  s.sort(([ax, ay], [bx, by]) => ax !== bx ? ax - bx : ay - by);
+  return s;
+}
+
+function cellsKey(cells) {
+  return cells.map(c => c.join(',')).join('|');
+}
+
+/**
+ * 90° CW rotation in screen-space (y increases downward):
+ * (x, y) → (y, -x)
+ */
+function rotateCW(cells) {
+  return norm(cells.map(([x, y]) => [y, -x]));
+}
+
+/**
+ * Canonical key: lexicographic minimum across all 8 symmetry forms
+ * (4 rotations × 2 for horizontal reflection = free polyomino equivalence).
+ */
+function canonKey(cells) {
+  const keys = [];
+  let a = norm(cells);
+  let b = norm(cells.map(([x, y]) => [-x, y]));  // horizontal flip
+  for (let i = 0; i < 4; i++) {
+    keys.push(cellsKey(a), cellsKey(b));
+    a = rotateCW(a);
+    b = rotateCW(b);
+  }
+  return keys.sort()[0];
+}
+
+/** Cache of free polyominoes by size. */
+const _polyCache = { 1: [[[0, 0]]] };
+
+/**
+ * Return all free polyominoes of size n (memoised).
+ * Counts: n=1:1, n=2:1, n=3:2, n=4:5, n=5:12, n=6:35, n=7:108.
+ */
+function getPolyominoes(n) {
+  if (_polyCache[n]) return _polyCache[n];
+  const prev = getPolyominoes(n - 1);
+  const seen = new Set();
+  const result = [];
+
+  for (const poly of prev) {
+    const occupied = new Set(poly.map(([x, y]) => `${x},${y}`));
+    for (const [px, py] of poly) {
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const [nx, ny] = [px + dx, py + dy];
+        if (!occupied.has(`${nx},${ny}`)) {
+          const np = norm([...poly, [nx, ny]]);
+          const key = canonKey(np);
+          if (!seen.has(key)) {
+            seen.add(key);
+            result.push(np);
+          }
+        }
+      }
+    }
+  }
+
+  _polyCache[n] = result;
+  return result;
+}
+
+/** Return 1–4 distinct CW rotations of a piece shape. */
+function computeRotations(cells) {
+  const rots = [];
+  const seen = new Set();
+  let c = norm(cells);
+  for (let i = 0; i < 4; i++) {
+    const k = cellsKey(c);
+    if (!seen.has(k)) { seen.add(k); rots.push(c); }
+    c = rotateCW(c);
+  }
+  return rots;
+}
+
+// ═══════════════════════════════════════════════════════
+//  COLOR PALETTE
+// ═══════════════════════════════════════════════════════
+
+const PALETTE = [
+  '#00e5ff', '#ffd600', '#d500f9', '#00e676',
+  '#ff1744', '#2979ff', '#ff6d00', '#f06292',
+  '#80d8ff', '#ccff90', '#ffab40', '#ea80fc',
+  '#b9f6ca', '#ff80ab', '#cfd8dc', '#ffe57f',
+];
+
+function buildColors(count) {
+  if (count <= PALETTE.length) return PALETTE.slice(0, count);
+  return Array.from({ length: count }, (_, i) => {
+    const h = i / count, s = 0.80, l = 0.57;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    if      (h < 1/6) [r,g,b] = [c,x,0];
+    else if (h < 2/6) [r,g,b] = [x,c,0];
+    else if (h < 3/6) [r,g,b] = [0,c,x];
+    else if (h < 4/6) [r,g,b] = [0,x,c];
+    else if (h < 5/6) [r,g,b] = [x,0,c];
+    else              [r,g,b] = [c,0,x];
+    const hex = v => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${hex(r)}${hex(g)}${hex(b)}`;
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  GAME
+// ═══════════════════════════════════════════════════════
+
+const CELL_PX   = 28;
+const DAS_MS    = 160;   // delay before auto-repeat (ms)
+const ARR_MS    = 40;    // auto-repeat interval (ms)
+const LINE_PTS  = [0, 100, 300, 500, 800];
+const NAMES     = ['','Monomino','Domino','Tromino','Tetromino',
+                   'Pentomino','Hexomino','Heptomino'];
+
+class Game {
+  constructor(n) {
+    this.n    = n;
+    this.COLS = Math.max(10, n + 6);
+    this.ROWS = 20;
+
+    const polys   = getPolyominoes(n);
+    this.types    = polys.map(cells => ({ cells, rots: computeRotations(cells) }));
+    this.colors   = buildColors(this.types.length);
+    // board[r][c]: 0 = empty, 1..K = piece-type index + 1
+    this.board    = Array.from({ length: this.ROWS }, () => new Uint8Array(this.COLS));
+
+    this.score  = 0;
+    this.lines  = 0;
+    this.level  = 1;
+    this.over   = false;
+    this.paused = false;
+
+    this._bag    = [];
+    this.nextIdx = this._draw();
+    this._spawn();
+  }
+
+  // ── Bag randomiser ────────────────────────────────────
+  _draw() {
+    if (!this._bag.length) {
+      this._bag = [...Array(this.types.length).keys()];
+      for (let i = this._bag.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [this._bag[i], this._bag[j]] = [this._bag[j], this._bag[i]];
+      }
+    }
+    return this._bag.pop();
+  }
+
+  // ── Spawn ─────────────────────────────────────────────
+  _spawn() {
+    this.pi  = this.nextIdx;
+    this.nextIdx = this._draw();
+    this.ri  = 0;
+    const cells = this.types[this.pi].rots[0];
+    const maxX  = Math.max(...cells.map(c => c[0]));
+    this.pc  = ((this.COLS - maxX - 1) / 2) | 0;
+    this.pr  = 0;
+    if (!this._ok(cells, this.pr, this.pc)) this.over = true;
+  }
+
+  // ── Helpers ───────────────────────────────────────────
+  _cur() { return this.types[this.pi].rots[this.ri]; }
+
+  _ok(cells, row, col) {
+    for (const [x, y] of cells) {
+      const r = row + y, c = col + x;
+      if (r < 0 || r >= this.ROWS || c < 0 || c >= this.COLS || this.board[r][c])
+        return false;
+    }
+    return true;
+  }
+
+  // ── Controls ──────────────────────────────────────────
+  rotate(dir) {
+    const rots = this.types[this.pi].rots;
+    const ri   = (this.ri + dir + rots.length) % rots.length;
+    const cells = rots[ri];
+    // Horizontal kicks first, then vertical+horizontal combos
+    for (const dk of [0, 1, -1, 2, -2]) {
+      if (this._ok(cells, this.pr, this.pc + dk)) {
+        this.ri = ri; this.pc += dk; return;
+      }
+    }
+    for (const dr of [-1, 1, -2, 2]) {
+      for (const dk of [0, 1, -1, 2, -2]) {
+        if (this._ok(cells, this.pr + dr, this.pc + dk)) {
+          this.ri = ri; this.pr += dr; this.pc += dk; return;
+        }
+      }
+    }
+  }
+
+  left()  { if (this._ok(this._cur(), this.pr, this.pc - 1)) this.pc--; }
+  right() { if (this._ok(this._cur(), this.pr, this.pc + 1)) this.pc++; }
+
+  /** Returns true if the piece moved down. */
+  down() {
+    if (this._ok(this._cur(), this.pr + 1, this.pc)) { this.pr++; return true; }
+    return false;
+  }
+
+  hardDrop() {
+    let d = 0;
+    while (this.down()) d++;
+    this.score += d * 2;
+    this._lock();
+  }
+
+  // ── Lock & line-clear ─────────────────────────────────
+  _lock() {
+    const cells = this._cur();
+    const ci    = this.pi + 1;
+    for (const [x, y] of cells) {
+      const r = this.pr + y, c = this.pc + x;
+      if (r >= 0 && r < this.ROWS && c >= 0 && c < this.COLS)
+        this.board[r][c] = ci;
+    }
+    this._clearLines();
+    this._spawn();
+  }
+
+  _clearLines() {
+    // Use filter — never splice+unshift in a loop (index corruption bug).
+    const isFull = row => row.every(v => v !== 0);
+    const ct = this.board.filter(isFull).length;
+    if (!ct) return;
+
+    const surviving = this.board.filter(row => !isFull(row));
+    const newRows   = Array.from({ length: ct }, () => new Uint8Array(this.COLS));
+    this.board = [...newRows, ...surviving];
+
+    const pts  = ct < LINE_PTS.length ? LINE_PTS[ct] : 800 + (ct - 4) * 300;
+    this.score += pts * this.level;
+    this.lines += ct;
+    this.level  = Math.floor(this.lines / 10) + 1;
+  }
+
+  dropMs() { return Math.max(50, 1000 - (this.level - 1) * 80); }
+
+  ghostRow() {
+    let r = this.pr;
+    while (this._ok(this._cur(), r + 1, this.pc)) r++;
+    return r;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDERING
+// ═══════════════════════════════════════════════════════
+
+function drawCell(ctx, px, py, color, cs, alpha = 1) {
+  ctx.globalAlpha = alpha;
+  // Main fill
+  ctx.fillStyle = color;
+  ctx.fillRect(px + 1, py + 1, cs - 2, cs - 2);
+  // Top & left highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.fillRect(px + 1, py + 1, cs - 2, 3);
+  ctx.fillRect(px + 1, py + 4,       3, cs - 5);
+  // Bottom & right shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.40)';
+  ctx.fillRect(px + 1,      py + cs - 4, cs - 2, 3);
+  ctx.fillRect(px + cs - 4, py + 1,      3,      cs - 4);
+  ctx.globalAlpha = 1;
+}
+
+function renderBoard(g, cvs) {
+  const cs = CELL_PX;
+  const W  = g.COLS * cs;
+  const H  = g.ROWS * cs;
+  if (cvs.width !== W || cvs.height !== H) { cvs.width = W; cvs.height = H; }
+
+  const ctx = cvs.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#07070f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = '#12122a';
+  ctx.lineWidth = 0.5;
+  for (let r = 0; r <= g.ROWS; r++) {
+    ctx.beginPath(); ctx.moveTo(0, r * cs); ctx.lineTo(W, r * cs); ctx.stroke();
+  }
+  for (let c = 0; c <= g.COLS; c++) {
+    ctx.beginPath(); ctx.moveTo(c * cs, 0); ctx.lineTo(c * cs, H); ctx.stroke();
+  }
+
+  // Locked cells
+  for (let r = 0; r < g.ROWS; r++) {
+    for (let c = 0; c < g.COLS; c++) {
+      const ci = g.board[r][c];
+      if (ci) drawCell(ctx, c * cs, r * cs, g.colors[ci - 1], cs);
+    }
+  }
+
+  if (!g.over) {
+    const cells = g._cur();
+    const color = g.colors[g.pi];
+    const gr    = g.ghostRow();
+
+    // Ghost piece
+    if (gr > g.pr) {
+      for (const [x, y] of cells)
+        drawCell(ctx, (g.pc + x) * cs, (gr + y) * cs, color, cs, 0.22);
+    }
+
+    // Active piece
+    for (const [x, y] of cells) {
+      if (g.pr + y >= 0)
+        drawCell(ctx, (g.pc + x) * cs, (g.pr + y) * cs, color, cs);
+    }
+  }
+
+  // Pause overlay
+  if (g.paused && !g.over) {
+    ctx.fillStyle = 'rgba(0,0,12,0.70)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${cs}px monospace`;
+    ctx.fillStyle = '#8888ff';
+    ctx.fillText('PAUSED', W / 2, H / 2);
+    ctx.font = `${cs * 0.55}px monospace`;
+    ctx.fillStyle = '#5555aa';
+    ctx.fillText('Press P to resume', W / 2, H / 2 + cs * 1.2);
+    ctx.textAlign = 'left';
+  }
+
+  // Game-over overlay
+  if (g.over) {
+    ctx.fillStyle = 'rgba(0,0,12,0.78)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${cs * 1.1}px monospace`;
+    ctx.fillStyle = '#ff4455';
+    ctx.fillText('GAME OVER', W / 2, H / 2 - cs * 0.8);
+    ctx.font = `${cs * 0.58}px monospace`;
+    ctx.fillStyle = '#8888bb';
+    ctx.fillText(`Score: ${g.score.toLocaleString()}`, W / 2, H / 2 + cs * 0.3);
+    ctx.fillText('Click \u25b6 New Game to play again', W / 2, H / 2 + cs * 1.2);
+    ctx.textAlign = 'left';
+  }
+}
+
+function renderNext(g, cvs) {
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+  ctx.fillStyle = '#07070f';
+  ctx.fillRect(0, 0, W, H);
+  if (g.over) return;
+
+  const cells = g.types[g.nextIdx].rots[0];
+  const color = g.colors[g.nextIdx];
+  const maxX  = Math.max(...cells.map(c => c[0]));
+  const maxY  = Math.max(...cells.map(c => c[1]));
+  const dim   = Math.max(maxX, maxY) + 1;
+  const cs    = Math.max(7, Math.min(24, Math.floor(Math.min(W, H) / (dim + 2))));
+  const ox    = ((W - (maxX + 1) * cs) / 2) | 0;
+  const oy    = ((H - (maxY + 1) * cs) / 2) | 0;
+
+  for (const [x, y] of cells)
+    drawCell(ctx, ox + x * cs, oy + y * cs, color, cs);
+}
+
+// ═══════════════════════════════════════════════════════
+//  MAIN LOOP & INPUT
+// ═══════════════════════════════════════════════════════
+
+const boardCvs = document.getElementById('board');
+const nextCvs  = document.getElementById('next-canvas');
+const elScore  = document.getElementById('el-score');
+const elLines  = document.getElementById('el-lines');
+const elLevel  = document.getElementById('el-level');
+const elNextLv = document.getElementById('el-next-lv');
+const elMode   = document.getElementById('el-mode');
+const nSel     = document.getElementById('nSel');
+const newBtn   = document.getElementById('newBtn');
+
+let game      = null;
+let rafId     = null;
+let dropTimer = 0;
+
+// held: code → { t0: timestamp of keydown, arrTick: last ARR tick index fired }
+const held = new Map();
+
+function startGame() {
+  if (rafId) cancelAnimationFrame(rafId);
+  held.clear();
+  const n  = +nSel.value;
+  game     = new Game(n);
+  dropTimer = performance.now();
+
+  const name = n < NAMES.length ? NAMES[n] : `${n}-omino`;
+  elMode.textContent = `${name}s \u00b7 ${game.types.length} type${game.types.length !== 1 ? 's' : ''}`;
+
+  rafId = requestAnimationFrame(tick);
+}
+
+function tick(now) {
+  if (game && !game.over && !game.paused) {
+    // Gravity
+    if (now - dropTimer >= game.dropMs()) {
+      dropTimer = now;
+      if (!game.down()) game._lock();
+    }
+
+    // DAS / ARR for held movement keys
+    for (const [code, st] of held) {
+      const elapsed = now - st.t0;
+      if (elapsed < DAS_MS) continue;
+      const arrTick = Math.floor((elapsed - DAS_MS) / ARR_MS);
+      if (arrTick > st.arrTick) {
+        st.arrTick = arrTick;
+        if (code === 'ArrowLeft')  game.left();
+        if (code === 'ArrowRight') game.right();
+        if (code === 'ArrowDown')  { if (game.down()) game.score++; }
+      }
+    }
+  }
+
+  if (game) {
+    renderBoard(game, boardCvs);
+    renderNext(game, nextCvs);
+    elScore.textContent = game.score.toLocaleString();
+    elLines.textContent = game.lines;
+    elLevel.textContent = game.level;
+    const toNext = 10 * game.level - game.lines;
+    elNextLv.textContent = toNext > 0 ? `${toNext} to lv ${game.level + 1}` : '';
+  }
+
+  rafId = requestAnimationFrame(tick);
+}
+
+// Prevent arrow keys and space from scrolling the page
+document.addEventListener('keydown', e => {
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(e.code))
+    e.preventDefault();
+
+  if (e.repeat) return; // ignore browser auto-repeat; DAS handles it
+  if (!game || game.over) return;
+
+  // Register DAS-eligible keys on first press
+  if (['ArrowLeft', 'ArrowRight', 'ArrowDown'].includes(e.code))
+    held.set(e.code, { t0: performance.now(), arrTick: 0 });
+
+  // When paused, only P works
+  if (game.paused) {
+    if (e.code === 'KeyP') game.paused = false;
+    return;
+  }
+
+  switch (e.code) {
+    case 'ArrowLeft':  game.left();         break;
+    case 'ArrowRight': game.right();        break;
+    case 'ArrowDown':  if (game.down()) game.score++; break;
+    case 'ArrowUp':
+    case 'KeyX':       game.rotate(1);     break;  // CW
+    case 'KeyZ':       game.rotate(-1);    break;  // CCW
+    case 'Space':      game.hardDrop();    break;
+    case 'KeyP':       game.paused = true; break;
+  }
+});
+
+document.addEventListener('keyup', e => held.delete(e.code));
+
+newBtn.addEventListener('click', startGame);
+
+// Kick off immediately
+startGame();
+</script>
+</body>
+</html>
