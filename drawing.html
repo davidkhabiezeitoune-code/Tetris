@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- iOS home-screen full-screen mode -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Baby Draw</title>
+<style>
+*, *::before, *::after {
+  margin: 0; padding: 0; box-sizing: border-box;
+  /* Block ALL browser touch gestures (zoom, scroll, pan) */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+
+canvas {
+  display: block;
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+
+/* Parent menu overlay */
+#overlay {
+  display: none;
+  position: fixed; inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.88);
+  justify-content: center; align-items: center;
+  flex-direction: column; gap: 20px;
+}
+#overlay.visible { display: flex; }
+
+#overlay h2 {
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: 0.05em;
+}
+
+.btn {
+  min-width: 280px;
+  padding: 20px 44px;
+  font-size: 20px;
+  font-weight: 700;
+  font-family: system-ui, -apple-system, sans-serif;
+  border: none;
+  border-radius: 18px;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+}
+#btn-clear  { background: #3ba83b; color: #fff; }
+#btn-exit   { background: #d63333; color: #fff; }
+#btn-cancel { background: #555;    color: #ddd; }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="overlay">
+  <h2>Parent Menu</h2>
+  <button class="btn" id="btn-clear">Clear Drawing</button>
+  <button class="btn" id="btn-exit">Exit Full Screen</button>
+  <button class="btn" id="btn-cancel">Back to Drawing</button>
+</div>
+
+<script>
+const canvas  = document.getElementById('c');
+const ctx     = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+
+// ---------- Canvas sizing (HiDPI-aware) ----------
+let W = 0, H = 0;
+
+function resize() {
+  const dpr  = window.devicePixelRatio || 1;
+  const newW = window.innerWidth;
+  const newH = window.innerHeight;
+  if (newW === W && newH === H) return;
+
+  // Snapshot existing drawing before resize
+  const snap = (W > 0 && H > 0) ? canvas.toDataURL() : null;
+
+  canvas.width  = newW * dpr;
+  canvas.height = newH * dpr;
+  ctx.scale(dpr, dpr);
+  W = newW; H = newH;
+
+  if (snap) {
+    const img = new Image();
+    img.onload = () => ctx.drawImage(img, 0, 0, W, H);
+    img.src = snap;
+  }
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- Color ----------
+let hue = Math.random() * 360;
+function nextColor() {
+  hue = (hue + 40 + Math.random() * 50) % 360;
+  return `hsl(${Math.round(hue)}, 100%, 65%)`;
+}
+
+// ---------- Drawing primitives ----------
+const BRUSH = 42; // diameter in CSS px — big enough for baby fingers
+
+function dot(x, y, color) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, BRUSH / 2, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 28;
+  ctx.fill();
+  ctx.restore();
+}
+
+function segment(x0, y0, x1, y1, color) {
+  ctx.save();
+  ctx.lineCap    = 'round';
+  ctx.lineJoin   = 'round';
+  ctx.lineWidth  = BRUSH;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur  = 22;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Small sparkle burst on new touch — makes it feel magical
+function sparkle(cx, cy, color) {
+  const N = 9;
+  for (let i = 0; i < N; i++) {
+    const angle = (i / N) * Math.PI * 2 + Math.random() * 0.3;
+    const dist  = 18 + Math.random() * 28;
+    const r     = 3 + Math.random() * 5;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist, r, 0, Math.PI * 2);
+    ctx.fillStyle   = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 12;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ---------- Touch tracking ----------
+// identifier -> { x, y, color }
+const strokes = new Map();
+
+function touchPos(t) {
+  const r = canvas.getBoundingClientRect();
+  return { x: t.clientX - r.left, y: t.clientY - r.top };
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const { x, y } = touchPos(t);
+    const color = nextColor();
+    strokes.set(t.identifier, { x, y, color });
+    dot(x, y, color);
+    sparkle(x, y, color);
+    checkCheatTap(x, y);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const s = strokes.get(t.identifier);
+    if (!s) continue;
+    const { x, y } = touchPos(t);
+    segment(s.x, s.y, x, y, s.color);
+    s.x = x; s.y = y;
+  }
+}, { passive: false });
+
+function endTouches(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) strokes.delete(t.identifier);
+}
+canvas.addEventListener('touchend',    endTouches, { passive: false });
+canvas.addEventListener('touchcancel', endTouches, { passive: false });
+
+// Block iOS Safari gesture events (pinch-to-zoom, etc.)
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, e => e.preventDefault(), { passive: false });
+}
+// Block double-tap zoom (legacy Safari)
+document.addEventListener('dblclick', e => e.preventDefault());
+
+// ---------- Cheat code: keyboard "1234" ----------
+// Works when a physical keyboard is connected to the iPad
+let keySeq = '';
+document.addEventListener('keydown', e => {
+  if ('1234'.includes(e.key) && e.key.length === 1) {
+    keySeq += e.key;
+    if (keySeq.length > 4) keySeq = keySeq.slice(-4);
+    if (keySeq === '1234') { keySeq = ''; showMenu(); }
+  } else {
+    keySeq = '';
+  }
+});
+
+// ---------- Cheat code: tap top-left corner 4 times ----------
+// Tap within the top-left 100×100 px square four times within 2.5 s
+const CORNER_PX = 100;
+let cornerTaps = 0, cornerTimer = null;
+function checkCheatTap(x, y) {
+  if (x > CORNER_PX || y > CORNER_PX) return;
+  cornerTaps++;
+  clearTimeout(cornerTimer);
+  if (cornerTaps >= 4) {
+    cornerTaps = 0;
+    showMenu();
+  } else {
+    cornerTimer = setTimeout(() => { cornerTaps = 0; }, 2500);
+  }
+}
+
+// ---------- Parent menu ----------
+function showMenu() { overlay.classList.add('visible'); }
+function hideMenu() { overlay.classList.remove('visible'); }
+
+document.getElementById('btn-cancel').addEventListener('click', hideMenu);
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  hideMenu();
+  ctx.clearRect(0, 0, W, H);
+});
+
+document.getElementById('btn-exit').addEventListener('click', () => {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (exit) exit.call(document).catch(() => {});
+  hideMenu();
+});
+
+// ---------- Request full screen ----------
+function goFullscreen() {
+  const el = document.documentElement;
+  const fn = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (fn) fn.call(el).catch(() => {});
+}
+
+goFullscreen();
+// Retry on first user touch (required by some browsers / Android Chrome)
+canvas.addEventListener('touchstart', () => {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) goFullscreen();
+}, { once: true, passive: true });
+</script>
+</body>
+</html>
