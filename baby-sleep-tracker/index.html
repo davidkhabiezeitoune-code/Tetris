@@ -366,6 +366,7 @@
   }
   .field textarea { resize: vertical; min-height: 52px; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
   .modal-skip { text-align: center; margin-top: 14px; font-size: 0.78rem; }
   .modal-skip a { color: var(--series-1); }
@@ -569,7 +570,7 @@
       <div class="big-check">📋</div>
       <h2 id="copyPanelTitle">Copied to your clipboard</h2>
       <ol>
-        <li>Tap <strong>Open sheet</strong> below</li>
+        <li>The sheet just opened in another tab — switch to it</li>
         <li>Tap the first empty cell in column A (under the last row)</li>
         <li>Paste — all 6 cells fill in at once</li>
       </ol>
@@ -578,6 +579,7 @@
         <p class="field-hint">Clipboard copy didn't work automatically — select the text below and copy it manually:</p>
         <textarea id="copyFallbackText" readonly onclick="this.select()"></textarea>
       </div>
+      <p class="field-hint" id="popupBlockedHint" style="display:none;">Didn't see a new tab open? Your browser may have blocked it — tap below to open it manually.</p>
       <div class="modal-actions" style="justify-content: center;">
         <button type="button" class="btn" id="copyPanelCloseBtn">Close</button>
         <a class="btn btn-primary" id="copyPanelOpenSheetBtn" href="#" target="_blank" rel="noopener">Open sheet</a>
@@ -1497,9 +1499,15 @@
     sessionForm.style.display = "none";
     copyPanel.style.display = "block";
 
+    // Open synchronously, in the same click handler, so browsers don't treat it as a blocked popup.
+    // Note: passing "noopener" here would make window.open() always return null per spec, even on
+    // success, so we deliberately omit it to keep the success/blocked check meaningful.
+    var sheetTab = window.open(EDIT_URL, "_blank");
+    document.getElementById("popupBlockedHint").style.display = sheetTab ? "none" : "block";
+
     copyToClipboard(tsvRow).then(function (ok) {
       if (ok) {
-        document.getElementById("copyPanelTitle").textContent = "Copied to your clipboard";
+        document.getElementById("copyPanelTitle").textContent = "Copied — sheet opened in a new tab";
       } else {
         document.getElementById("copyPanelTitle").textContent = "Copy this row manually";
         document.getElementById("copyFallback").classList.add("show");
