@@ -402,6 +402,11 @@
     <span>⚙️ Not connected to the shared database yet. Open <code>index.html</code>, set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the script (see <code>README.md</code> for setup steps), then reload.</span>
   </div>
 
+  <div class="banner" id="emptyStateBanner" style="display:none;">
+    <span>Your database is empty. Load the 19 sessions from the original spreadsheet, or just start logging fresh with <strong>+ Log a session</strong>.</span>
+    <button class="btn btn-primary" id="loadSampleBtn">Load 19 sample sessions</button>
+  </div>
+
   <section class="filter-row" aria-label="Filters">
     <select id="filterRange" aria-label="Date range">
       <option value="all">All time</option>
@@ -568,10 +573,36 @@
   var isConfigured = SUPABASE_URL.indexOf("YOUR_SUPABASE") === -1 && SUPABASE_ANON_KEY.indexOf("YOUR_SUPABASE") === -1;
   var sb = (isConfigured && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+  /* ---------- sample data (from the original spreadsheet, 6-13 July) ----------
+     Loaded on demand via the "Load 19 sample sessions" button when the table
+     is empty — no SQL required. */
+  var SAMPLE_ROWS = [
+    ["2026-07-06","12:10","12:15","Nap","Rosie","Quick cuddle, put down awake, pat to sleep circa 5 mins","Wanted to be put down"],
+    ["2026-07-06","19:30","20:00","Bedtime","Dave","Rock to sleep; transfer deeply asleep","Tried rocking to transfer drowsy but didn't work; first 1 nap day, should have been tired"],
+    ["2026-07-06","23:30","01:30","Night wake-up","Dave","Floorbed co-sleeping","Wake up reason unknown; attempted 10min CIO then would fall asleep quickly on Dave but not transfer; first day of successful 1 day nap day"],
+    ["2026-07-07","12:10","12:15","Nap","Rosie","Quick cuddle, put down drowsy, pat to sleep","Was being wriggly and pointing at door, gently rocked him till rubbing eyes (circa 2/3 mins) put down drowsy and then firm pats and shush for a couple mins till asleep"],
+    ["2026-07-07","19:30","19:35","Bedtime","Dave","Rocked to sleep but it only took two minutes of hypnotist voice. Cuddled on chair then transferred asleep",""],
+    ["2026-07-08","12:10","","Nap","-","Fell asleep in car","Transferred to cot but woke up after 1.5h"],
+    ["2026-07-08","20:00","20:10","Bedtime","Pia","(Post vomit) Bottle and short cuddle on armchair; transfer asleep","Initially accepted being put down into his cot immediately after stories and attempted to wind himself down with me next to him, but a bit of coughing triggered a vomit"],
+    ["2026-07-09","06:25","06:50","Night wake-up","-","Played and self settled",""],
+    ["2026-07-09","12:45","12:55","Nap","Rosie","Cuddled till drowsy(ish) and then patted till sleep.","Initial try unsuccessful, but worked after 1 min more cuddles. He wanted to be put in the cot. Was acting not tired the whole time I was holding him"],
+    ["2026-07-09","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
+    ["2026-07-10","12:25","12:40","Nap","Rosie","Rocked to very drowsy, took a bit longer to settle due to light. Patted until fully asleep for about 3/4 mins",""],
+    ["2026-07-10","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
+    ["2026-07-11","13:00","13:05","Nap","Rosie","Rocked until slightly drowsy, patted in cot couple minutes",""],
+    ["2026-07-11","20:05","20:45","Bedtime","Rosie","Up and down in cot, very resistant. Eventually put down almost asleep and then patted",""],
+    ["2026-07-12","12:30","12:55","Nap","Rosie","Initially very upset, had to come downstairs and reset. Once back in room, rocked until just asleep then patted. Had to really encourage the sleep",""],
+    ["2026-07-12","19:25","19:40","Bedtime","Dave","Rock to sleep; transfer deeply asleep",""],
+    ["2026-07-13","12:25","12:30","Nap","Rosie","Walked around with him until literally just asleep, transferred immediately and patted while he waa waaed until asleep",""],
+    ["2026-07-13","19:25","19:45","Bedtime","Dave","Rock to sleep; transfer deeply asleep. Quite tricky - he was very vocal the whole time.",""],
+    ["2026-07-13","21:10","21:30","Night wake-up","Pia","Milk, snuggle, a couple of transfer attempts;","Initially refused milk but then had it; seemed unsettled; perhaps a belly ache as he had a troubled gut during the day?"]
+  ];
+
   /* ---------- state ---------- */
   var sessions = [];
   var sort = { key: "date", dir: "desc" };
   var editingId = null;
+  var hasFetchedOnce = false;
 
   function rowToSession(row) {
     return {
@@ -614,14 +645,39 @@
     if (res.error) { setSyncStatus("error", res.error.message); return; }
     sessions = res.data.map(rowToSession);
     setSyncStatus("ok");
+    hasFetchedOnce = true;
+    document.getElementById("emptyStateBanner").style.display = sessions.length === 0 ? "flex" : "none";
     renderAll();
   }
+
+  async function loadSampleData() {
+    if (!sb) return;
+    var loadBtn = document.getElementById("loadSampleBtn");
+    loadBtn.disabled = true;
+    loadBtn.textContent = "Loading…";
+    var rows = SAMPLE_ROWS.map(function (r) {
+      return { date: r[0], start_time: r[1], end_time: r[2] || null, event_type: r[3], carer: r[4], method: r[5], notes: r[6] };
+    });
+    var res = await sb.from("sessions").insert(rows);
+    loadBtn.disabled = false;
+    loadBtn.textContent = "Load 19 sample sessions";
+    if (res.error) { alert("Couldn't load sample data: " + res.error.message); return; }
+    await fetchSessions();
+  }
+  document.getElementById("loadSampleBtn").addEventListener("click", loadSampleData);
 
   function subscribeRealtime() {
     if (!sb) return;
     sb.channel("sessions-sync")
       .on("postgres_changes", { event: "*", schema: "public", table: "sessions" }, function () { fetchSessions(); })
       .subscribe();
+  }
+
+  function startPolling() {
+    if (!sb) return;
+    setInterval(function () {
+      if (!document.hidden) fetchSessions();
+    }, 45000);
   }
 
   /* ---------- time helpers ---------- */
@@ -1432,6 +1488,7 @@
     setSyncStatus("connecting");
     fetchSessions();
     subscribeRealtime();
+    startPolling();
   }
 })();
 </script>

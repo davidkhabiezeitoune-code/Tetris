@@ -1,5 +1,10 @@
 -- Sleep & Settling Tracker — Supabase schema
--- Run this once in your Supabase project's SQL editor (Database > SQL Editor > New query).
+-- Optional shortcut: run this once in your Supabase project's SQL editor
+-- (Database > SQL Editor > New query) to do everything in one go — table,
+-- policies, realtime, and the 19 sample sessions. If pasting into the SQL
+-- editor is awkward (e.g. on mobile), see README.md for the equivalent
+-- tap-only setup via the Table Editor UI, plus an in-app "Load 19 sample
+-- sessions" button that needs no SQL at all.
 
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
