@@ -1537,10 +1537,10 @@
 
     var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Typical time of day by event type" });
 
-    for (var hh = 0; hh <= 24; hh += 4) {
+    for (var hh = 0; hh <= 24; hh += 1) {
       var gy = padT + (hh / 24) * plotH;
       svg.appendChild(svgEl("line", { class: "grid-line", x1: padL, x2: padL + plotW, y1: gy, y2: gy }));
-      if (hh < 24) {
+      if (hh < 24 && hh % 4 === 0) {
         var lbl = svgEl("text", { x: padL - 8, y: gy + 3, "text-anchor": "end", class: "axis-label" });
         lbl.textContent = axisHoursToLabel(hh);
         svg.appendChild(lbl);
