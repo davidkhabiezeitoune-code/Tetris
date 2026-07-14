@@ -1,71 +1,49 @@
 # Sleep & Settling Tracker
 
-A web app that turns a baby sleep-log spreadsheet into a shared dashboard: a
-session log (nap/bedtime/night-wake-up), settle-time analytics, and a form for
-logging new sessions — synced live across every carer's device via Supabase.
+A read-only dashboard that turns your baby sleep-log Google Sheet into charts,
+KPIs, and a searchable session table — no account, no database, no backend.
+You keep logging sessions the way you already do, directly in the Sheet (or
+via its mobile app); this page just reads it live and visualizes it.
 
-## Setup (mobile-friendly, no SQL required)
+## Setup (one step)
 
-1. Create a free project at [supabase.com](https://supabase.com) — a few taps,
-   no code.
-2. **Create the table** — open your project, tap **Table Editor** in the left
-   sidebar → **New table**. Name it `sessions`, leave "Enable Row Level
-   Security" checked, and add these columns (tap **+ New column** for each —
-   `id` and `created_at` already exist by default, don't touch those):
+Open the spreadsheet → **Share** (top right) → change access to **"Anyone
+with the link" → Viewer**. That's it — the app reads the sheet's public CSV
+export directly from the browser, no API key needed.
 
-   | Name | Type | Nullable? |
-   |---|---|---|
-   | `date` | `date` | No |
-   | `start_time` | `time` | No |
-   | `end_time` | `time` | Yes |
-   | `event_type` | `text` | No |
-   | `carer` | `text` | Yes |
-   | `method` | `text` | Yes |
-   | `notes` | `text` | Yes |
+The sheet ID is already wired into `index.html` (`SHEET_ID` near the top of
+the `<script>` block). If you ever copy this app to track a different sheet,
+that's the only thing to change.
 
-   Tap **Save**.
+## Why read-only
 
-3. **Allow the app to read/write it** — since there's no login (see "Access
-   model" below), every carer connects with the same public "anon" key, so the
-   table needs policies that let that key do everything. Tap the table's
-   **Policies** tab (or **Authentication → Policies**) → **New Policy** →
-   pick the **quickstart template** for enabling access to everyone / all
-   users, apply it, and save. Do this once each for **select**, **insert**,
-   **update**, and **delete** (some templates cover all four at once — either
-   is fine).
+Google only allows *writes* to a sheet from someone logged in editing it
+directly, or from a Google Form's public submission endpoint — there's no
+way to accept writes from an anonymous web page without a login somewhere.
+Rather than requiring an account for that, the app leans into what already
+works with zero setup: you and the other carers keep adding rows in the
+actual Google Sheet (using the Sheets app, which is built for exactly this),
+and the dashboard reflects it within about 30 seconds — no separate "backend"
+to maintain, ever.
 
-4. **Turn on live sync** — still in Table Editor, open the `sessions` table's
-   `•••` menu (or **Database → Replication**) and toggle **Realtime** on for
-   this table. This is what makes a session logged on one phone show up on
-   everyone else's without a refresh — the app also polls every 45s as a
-   backup if this step gets skipped.
+The **Log a session** button in the header just opens the sheet directly for
+you to add a row.
 
-5. **Get your keys** — tap **Settings → API**. Copy the **Project URL** and
-   the **anon / public key** (short strings, easy to copy individually).
+## Column format
 
-6. Open `index.html`, find these two lines near the top of the `<script>`
-   block, and paste your values in:
-   ```js
-   var SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
-   var SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-   ```
+The app looks for columns by header keyword (case-insensitive), so it's
+tolerant of re-wording, but expects roughly:
 
-7. Reload the page. The status pill in the header should read **● Synced**,
-   and since the table is empty, you'll see a banner offering to **load the
-   19 sample sessions** from the original spreadsheet with one tap — no SQL
-   needed for that either.
+| Column (header contains…) | Example |
+|---|---|
+| `date` | `6 July` or `7/6/2026` |
+| `time` | `12:10-12:15` (settling start–end; a single time like `12:10` is fine too, it just won't have a computed duration) |
+| `event`/`type` | `Nap time`, `Bedtime`, `Night wake-up` |
+| `carer` | `Rosie`, `Dave`, `Pia`, or `-` for self-settled |
+| `settled`/`method` | free text |
+| `notes` | free text |
 
-If you're on a laptop/desktop at some point, [`supabase/schema.sql`](supabase/schema.sql)
-does all of the above (table, policies, realtime, seed data) in one paste into
-the SQL Editor — a shortcut, not a requirement.
-
-## Access model
-
-There's no login. Anyone with the page URL can read and log sessions — the
-anon key is safe to embed in the page (that's how Supabase is designed to be
-used; access is controlled by the policies from step 3, not by keeping the
-key secret). Treat the page URL itself as the thing you keep private, the
-same way you'd treat a shared link to a private document.
+Time ranges that cross midnight (e.g. `23:30-1:30`) are handled correctly.
 
 ## Hosting it
 
@@ -77,23 +55,22 @@ To access it from everyone's phone, either:
 
 ## Features
 
-- Log sessions: date, event type (nap/bedtime/night wake-up/custom), start &
-  end time, carer, settling method, notes.
-- **Live sync** — a session logged on one phone appears on everyone else's
-  within moments (realtime, with a 45s poll as a fallback).
-- Auto-computed settle duration, including overnight wake-ups that cross
-  midnight.
+- **Live read** from the Sheet — polls every ~30s, no login.
 - Charts: settle time per session, average settle time by type, who settles
   which events, night wake-ups by day, common settling techniques (extracted
   from the "how he settled" text).
+- KPI tiles: sessions logged, average settle time, night wake-ups in the last
+  7 days, most active carer.
 - Filter by date range, event type, carer, or free-text search.
-- Sortable session table with inline edit/delete.
-- CSV export.
+- Sortable session table.
+- CSV export of the parsed data.
 - Light/dark theme (follows system, or toggle manually).
 
-## Data ownership
+## Limitations
 
-Your sleep log lives in your own Supabase project — not on any Anthropic or
-third-party server tied to this repo. You can export it anytime (Export CSV),
-inspect/query it directly in the Supabase dashboard, or delete the project to
-erase everything.
+- **No in-app editing.** Fixing or removing a logged session happens in the
+  actual Google Sheet (tap **Log a session** to jump there).
+- **~30s lag**, not instant — there's no live-push for Sheets the way a real
+  database has.
+- If the sheet's sharing gets changed back to restricted, the app shows a
+  clear "can't reach sheet" banner rather than failing silently.

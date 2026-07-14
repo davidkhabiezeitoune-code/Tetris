@@ -134,6 +134,7 @@
     font-size: 0.88rem;
     font-weight: 600;
     cursor: pointer;
+    text-decoration: none;
   }
   .btn:hover { border-color: var(--series-1); }
   .btn:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
@@ -149,7 +150,6 @@
     padding: 8px 10px;
   }
   .btn-icon { width: 34px; height: 34px; padding: 0; justify-content: center; }
-  .btn-danger { color: var(--status-critical); }
 
   .banner {
     background: var(--surface-2);
@@ -163,7 +163,7 @@
     gap: 10px;
     align-items: center;
   }
-  .banner button { margin-left: auto; }
+  .banner button, .banner a.btn { margin-left: auto; flex: none; }
   .banner.error { border-color: var(--status-critical); }
   .banner code { background: var(--surface-1); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
 
@@ -177,7 +177,7 @@
   }
   .sync-status.ok { color: var(--status-good); }
   .sync-status.connecting { color: var(--text-muted); }
-  .sync-status.error, .sync-status.unconfigured { color: var(--status-critical); }
+  .sync-status.error { color: var(--status-critical); }
 
   .filter-row {
     display: flex;
@@ -318,56 +318,15 @@
   .table-header h2 { font-size: 0.95rem; margin: 0; }
   .table-header .spacer { flex: 1; }
   .table-scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; min-width: 760px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; min-width: 700px; }
   th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--gridline); vertical-align: top; }
   th { color: var(--text-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; white-space: nowrap; }
   th:hover { color: var(--text-primary); }
-  th .sort-arrow { font-size: 0.65rem; margin-left: 3px; }
-  td.notes-cell, td.method-cell { max-width: 240px; color: var(--text-secondary); }
+  td.notes-cell, td.method-cell { max-width: 260px; color: var(--text-secondary); }
   td.time-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
   .type-badge { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .type-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  .row-actions { display: flex; gap: 6px; white-space: nowrap; }
-  .row-actions button { background: transparent; border: none; cursor: pointer; color: var(--text-muted); font-size: 0.78rem; padding: 2px 4px; }
-  .row-actions button:hover { color: var(--series-1); }
-  .row-actions .del:hover { color: var(--status-critical); }
   .empty-row td { text-align: center; color: var(--text-muted); padding: 30px 0; }
-
-  .modal-overlay {
-    position: fixed; inset: 0;
-    background: var(--overlay);
-    display: none;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 40px 16px;
-    overflow-y: auto;
-    z-index: 100;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal {
-    background: var(--surface-2);
-    border-radius: 14px;
-    padding: 22px 22px 18px;
-    width: 100%;
-    max-width: 480px;
-    border: 1px solid var(--border);
-  }
-  .modal h2 { margin: 0 0 14px; font-size: 1.05rem; }
-  .field { margin-bottom: 13px; }
-  .field label { display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
-  .field input, .field select, .field textarea {
-    width: 100%;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 0.88rem;
-  }
-  .field textarea { resize: vertical; min-height: 52px; }
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .field-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
-  .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
-  .modal-actions .right { display: flex; gap: 8px; }
 
   footer.app-footer {
     max-width: 1160px; margin: 24px auto 0; padding: 0 20px;
@@ -376,7 +335,6 @@
 
   @media (max-width: 760px) {
     .charts-grid { grid-template-columns: 1fr; }
-    .field-row { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -394,17 +352,13 @@
       <span class="sync-status" id="syncStatus">● Connecting…</span>
       <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
       <button class="btn" id="exportBtn">Export CSV</button>
-      <button class="btn btn-primary" id="addBtn">+ Log a session</button>
+      <a class="btn btn-primary" id="openSheetBtn" href="#" target="_blank" rel="noopener">Log a session</a>
     </div>
   </header>
 
-  <div class="banner error" id="setupBanner" style="display:none;">
-    <span>⚙️ Not connected to the shared database yet. Open <code>index.html</code>, set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the script (see <code>README.md</code> for setup steps), then reload.</span>
-  </div>
-
-  <div class="banner" id="emptyStateBanner" style="display:none;">
-    <span>Your database is empty. Load the 19 sessions from the original spreadsheet, or just start logging fresh with <strong>+ Log a session</strong>.</span>
-    <button class="btn btn-primary" id="loadSampleBtn">Load 19 sample sessions</button>
+  <div class="banner error" id="connectionBanner" style="display:none;">
+    <span id="connectionBannerText">⚠️ Can't reach the spreadsheet.</span>
+    <button class="btn btn-ghost" id="retryBtn">Retry</button>
   </div>
 
   <section class="filter-row" aria-label="Filters">
@@ -475,7 +429,6 @@
             <th data-key="duration">Settle time</th>
             <th data-key="method">How he settled</th>
             <th data-key="notes">Notes</th>
-            <th></th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>
@@ -484,200 +437,202 @@
   </section>
 
   <footer class="app-footer">
-    Shared with every carer via Supabase — changes made on one device appear on all others.
+    Reads live from your Google Sheet — add a row there and it shows up here on the next refresh (~30s).
   </footer>
-</div>
-
-<div class="modal-overlay" id="modalOverlay">
-  <form class="modal" id="sessionForm">
-    <h2 id="modalTitle">Log a session</h2>
-
-    <div class="field-row">
-      <div class="field">
-        <label for="f-date">Date</label>
-        <input type="date" id="f-date" required>
-      </div>
-      <div class="field">
-        <label for="f-type">Event type</label>
-        <select id="f-type">
-          <option value="Nap">Nap</option>
-          <option value="Bedtime">Bedtime</option>
-          <option value="Night wake-up">Night wake-up</option>
-          <option value="__other">Other…</option>
-        </select>
-      </div>
-    </div>
-    <div class="field" id="f-type-other-wrap" style="display:none;">
-      <label for="f-type-other">Custom event type</label>
-      <input type="text" id="f-type-other" placeholder="e.g. Nap 2">
-    </div>
-
-    <div class="field-row">
-      <div class="field">
-        <label for="f-start">Settling started</label>
-        <input type="time" id="f-start" required>
-      </div>
-      <div class="field">
-        <label for="f-end">Settled / asleep by</label>
-        <input type="time" id="f-end">
-      </div>
-    </div>
-    <p class="field-hint" id="durationHint"></p>
-
-    <div class="field">
-      <label for="f-carer">Carer</label>
-      <input type="text" id="f-carer" list="carerOptions" placeholder="Rosie, Dave, Pia, or “-” for self-settled">
-      <datalist id="carerOptions"></datalist>
-    </div>
-
-    <div class="field">
-      <label for="f-method">How he settled</label>
-      <textarea id="f-method" placeholder="e.g. Rocked to drowsy, patted in cot"></textarea>
-    </div>
-
-    <div class="field">
-      <label for="f-notes">Notes (suspected reasons, circumstances)</label>
-      <textarea id="f-notes" placeholder="e.g. teething, vaccination, routine change…"></textarea>
-    </div>
-
-    <div class="modal-actions">
-      <button type="button" class="btn btn-danger btn-ghost" id="deleteBtn" style="display:none;">Delete</button>
-      <div class="right">
-        <button type="button" class="btn" id="cancelBtn">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save</button>
-      </div>
-    </div>
-  </form>
 </div>
 
 <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function () {
   "use strict";
 
-  /* ---------- Supabase config ----------
-     1. Create a free project at https://supabase.com
-     2. Run supabase/schema.sql (in this repo) in the SQL editor
-     3. Copy Project URL + anon public key from Settings > API and paste below
+  /* ---------- Google Sheet config ----------
+     The app reads this sheet directly as CSV — no account, no API key.
+     Requires the sheet's sharing to be set to "Anyone with the link" → Viewer.
   */
-  var SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
-  var SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+  var SHEET_ID = "1086aJ9KzV_ZBd-ZkOtnumy0B5s5DO3L5_vEYTEv0BVo";
+  var CSV_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/export?format=csv";
+  var EDIT_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
   var NAME_KEY = "sleepTracker.babyName";
   var THEME_KEY = "sleepTracker.theme";
 
   var SVG_NS = "http://www.w3.org/2000/svg";
+  var POLL_MS = 30000;
 
-  var isConfigured = SUPABASE_URL.indexOf("YOUR_SUPABASE") === -1 && SUPABASE_ANON_KEY.indexOf("YOUR_SUPABASE") === -1;
-  var sb = (isConfigured && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-
-  /* ---------- sample data (from the original spreadsheet, 6-13 July) ----------
-     Loaded on demand via the "Load 19 sample sessions" button when the table
-     is empty — no SQL required. */
-  var SAMPLE_ROWS = [
-    ["2026-07-06","12:10","12:15","Nap","Rosie","Quick cuddle, put down awake, pat to sleep circa 5 mins","Wanted to be put down"],
-    ["2026-07-06","19:30","20:00","Bedtime","Dave","Rock to sleep; transfer deeply asleep","Tried rocking to transfer drowsy but didn't work; first 1 nap day, should have been tired"],
-    ["2026-07-06","23:30","01:30","Night wake-up","Dave","Floorbed co-sleeping","Wake up reason unknown; attempted 10min CIO then would fall asleep quickly on Dave but not transfer; first day of successful 1 day nap day"],
-    ["2026-07-07","12:10","12:15","Nap","Rosie","Quick cuddle, put down drowsy, pat to sleep","Was being wriggly and pointing at door, gently rocked him till rubbing eyes (circa 2/3 mins) put down drowsy and then firm pats and shush for a couple mins till asleep"],
-    ["2026-07-07","19:30","19:35","Bedtime","Dave","Rocked to sleep but it only took two minutes of hypnotist voice. Cuddled on chair then transferred asleep",""],
-    ["2026-07-08","12:10","","Nap","-","Fell asleep in car","Transferred to cot but woke up after 1.5h"],
-    ["2026-07-08","20:00","20:10","Bedtime","Pia","(Post vomit) Bottle and short cuddle on armchair; transfer asleep","Initially accepted being put down into his cot immediately after stories and attempted to wind himself down with me next to him, but a bit of coughing triggered a vomit"],
-    ["2026-07-09","06:25","06:50","Night wake-up","-","Played and self settled",""],
-    ["2026-07-09","12:45","12:55","Nap","Rosie","Cuddled till drowsy(ish) and then patted till sleep.","Initial try unsuccessful, but worked after 1 min more cuddles. He wanted to be put in the cot. Was acting not tired the whole time I was holding him"],
-    ["2026-07-09","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
-    ["2026-07-10","12:25","12:40","Nap","Rosie","Rocked to very drowsy, took a bit longer to settle due to light. Patted until fully asleep for about 3/4 mins",""],
-    ["2026-07-10","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
-    ["2026-07-11","13:00","13:05","Nap","Rosie","Rocked until slightly drowsy, patted in cot couple minutes",""],
-    ["2026-07-11","20:05","20:45","Bedtime","Rosie","Up and down in cot, very resistant. Eventually put down almost asleep and then patted",""],
-    ["2026-07-12","12:30","12:55","Nap","Rosie","Initially very upset, had to come downstairs and reset. Once back in room, rocked until just asleep then patted. Had to really encourage the sleep",""],
-    ["2026-07-12","19:25","19:40","Bedtime","Dave","Rock to sleep; transfer deeply asleep",""],
-    ["2026-07-13","12:25","12:30","Nap","Rosie","Walked around with him until literally just asleep, transferred immediately and patted while he waa waaed until asleep",""],
-    ["2026-07-13","19:25","19:45","Bedtime","Dave","Rock to sleep; transfer deeply asleep. Quite tricky - he was very vocal the whole time.",""],
-    ["2026-07-13","21:10","21:30","Night wake-up","Pia","Milk, snuggle, a couple of transfer attempts;","Initially refused milk but then had it; seemed unsettled; perhaps a belly ache as he had a troubled gut during the day?"]
-  ];
+  document.getElementById("openSheetBtn").href = EDIT_URL;
 
   /* ---------- state ---------- */
   var sessions = [];
   var sort = { key: "date", dir: "desc" };
-  var editingId = null;
-  var hasFetchedOnce = false;
 
-  function rowToSession(row) {
-    return {
-      id: row.id,
-      date: row.date,
-      startTime: (row.start_time || "").slice(0, 5),
-      endTime: row.end_time ? row.end_time.slice(0, 5) : null,
-      eventType: row.event_type,
-      carer: row.carer || "",
-      method: row.method || "",
-      notes: row.notes || ""
-    };
-  }
-  function sessionToRow(s) {
-    return {
-      date: s.date,
-      start_time: s.startTime,
-      end_time: s.endTime || null,
-      event_type: s.eventType,
-      carer: s.carer || null,
-      method: s.method || null,
-      notes: s.notes || null
-    };
+  /* ---------- CSV + column parsing ---------- */
+  function parseCSV(text) {
+    var rows = [], row = [], field = "", inQuotes = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (inQuotes) {
+        if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+        else field += c;
+      } else {
+        if (c === '"') inQuotes = true;
+        else if (c === ",") { row.push(field); field = ""; }
+        else if (c === "\r") { /* skip */ }
+        else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+        else field += c;
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows;
   }
 
+  function findCol(headers, keywords) {
+    for (var i = 0; i < headers.length; i++) {
+      var h = (headers[i] || "").toLowerCase();
+      for (var j = 0; j < keywords.length; j++) {
+        if (h.indexOf(keywords[j]) !== -1) return i;
+      }
+    }
+    return -1;
+  }
+
+  var MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  function parseDateLabel(raw) {
+    if (!raw) return null;
+    raw = String(raw).trim();
+    var mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) return mdy[3] + "-" + pad2(mdy[1]) + "-" + pad2(mdy[2]);
+    var iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (iso) return iso[1] + "-" + pad2(iso[2]) + "-" + pad2(iso[3]);
+    var m = raw.toLowerCase().match(/(\d{1,2})\s*(?:st|nd|rd|th)?\s+([a-z]+)\s*(\d{4})?/);
+    if (m) {
+      var day = parseInt(m[1], 10);
+      var monthIdx = -1;
+      for (var k = 0; k < MONTHS.length; k++) { if (MONTHS[k].indexOf(m[2]) === 0) { monthIdx = k; break; } }
+      if (monthIdx === -1) return null;
+      var year = m[3] ? parseInt(m[3], 10) : new Date().getFullYear();
+      var candidate = year + "-" + pad2(monthIdx + 1) + "-" + pad2(day);
+      if (!m[3]) {
+        var d = new Date(candidate + "T00:00:00");
+        var future = new Date(); future.setDate(future.getDate() + 30);
+        if (d > future) candidate = (year - 1) + "-" + pad2(monthIdx + 1) + "-" + pad2(day);
+      }
+      return candidate;
+    }
+    return null;
+  }
+  function pad2(n) { n = String(n); return n.length < 2 ? "0" + n : n; }
+
+  function parseTimeToken(raw) {
+    if (!raw) return null;
+    raw = String(raw).trim();
+    var ampm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)$/);
+    if (ampm) {
+      var h = parseInt(ampm[1], 10), m = ampm[2], ap = ampm[3].toUpperCase();
+      if (ap === "PM" && h !== 12) h += 12;
+      if (ap === "AM" && h === 12) h = 0;
+      return pad2(h) + ":" + m;
+    }
+    var norm = raw.replace(".", ":");
+    if (norm.indexOf(":") === -1) {
+      if (!/^\d+$/.test(norm)) return null;
+      norm += ":00";
+    }
+    var parts = norm.split(":");
+    var hour = parseInt(parts[0], 10);
+    var min = (parts[1] || "00").slice(0, 2);
+    if (isNaN(hour)) return null;
+    return pad2(hour) + ":" + (min.length < 2 ? "0" + min : min);
+  }
+  function parseTimeRange(raw) {
+    if (!raw) return { start: null, end: null };
+    raw = String(raw).trim();
+    if (!raw) return { start: null, end: null };
+    var dashIdx = raw.indexOf("-");
+    if (dashIdx === -1) return { start: parseTimeToken(raw), end: null };
+    return { start: parseTimeToken(raw.slice(0, dashIdx)), end: parseTimeToken(raw.slice(dashIdx + 1)) };
+  }
+
+  function normalizeEventType(raw) {
+    raw = (raw || "").trim();
+    var low = raw.toLowerCase();
+    if (low.indexOf("nap") !== -1) return "Nap";
+    if (low.indexOf("bed") !== -1) return "Bedtime";
+    if (low.indexOf("wake") !== -1) return "Night wake-up";
+    return raw || "Other";
+  }
+
+  function rowsToSessions(rows) {
+    if (!rows.length) return [];
+    var headers = rows[0];
+    var dateCol = findCol(headers, ["date"]);
+    var timeCol = findCol(headers, ["time"]);
+    var typeCol = findCol(headers, ["event", "type"]);
+    var carerCol = findCol(headers, ["carer"]);
+    var methodCol = findCol(headers, ["settled", "method"]);
+    var notesCol = findCol(headers, ["notes"]);
+
+    var out = [];
+    for (var r = 1; r < rows.length; r++) {
+      var row = rows[r];
+      var dateRaw = dateCol !== -1 ? row[dateCol] : "";
+      var timeRaw = timeCol !== -1 ? row[timeCol] : "";
+      var typeRaw = typeCol !== -1 ? row[typeCol] : "";
+      if (!dateRaw && !timeRaw && !typeRaw) continue;
+      var date = parseDateLabel(dateRaw);
+      if (!date) continue;
+      var times = parseTimeRange(timeRaw);
+      out.push({
+        id: "row-" + r,
+        date: date,
+        startTime: times.start,
+        endTime: times.end,
+        eventType: normalizeEventType(typeRaw),
+        carer: carerCol !== -1 ? (row[carerCol] || "").trim() : "",
+        method: methodCol !== -1 ? (row[methodCol] || "").trim() : "",
+        notes: notesCol !== -1 ? (row[notesCol] || "").trim() : ""
+      });
+    }
+    return out;
+  }
+
+  /* ---------- fetch + sync status ---------- */
   function setSyncStatus(state, message) {
     var el = document.getElementById("syncStatus");
-    var banner = document.getElementById("setupBanner");
-    if (!el) return;
+    var banner = document.getElementById("connectionBanner");
+    var bannerText = document.getElementById("connectionBannerText");
     el.className = "sync-status " + state;
-    if (state === "ok") { el.textContent = "● Synced"; el.title = "Connected to the shared database"; banner.style.display = "none"; }
-    else if (state === "connecting") { el.textContent = "● Connecting…"; el.title = ""; banner.style.display = "none"; }
-    else if (state === "error") { el.textContent = "● Sync error"; el.title = message || ""; banner.style.display = "none"; }
-    else { el.textContent = "● Not connected"; el.title = ""; banner.style.display = "flex"; }
+    if (state === "ok") { el.textContent = "● Synced"; el.title = "Last read succeeded"; banner.style.display = "none"; }
+    else if (state === "connecting") { el.textContent = "● Connecting…"; el.title = ""; }
+    else if (state === "error") {
+      el.textContent = "● Can't reach sheet";
+      el.title = message || "";
+      bannerText.textContent = "⚠️ Can't read the spreadsheet. Make sure it's shared as \"Anyone with the link\" → Viewer (Share button, top right of the sheet), then retry.";
+      banner.style.display = "flex";
+    }
   }
 
   async function fetchSessions() {
-    if (!sb) return;
-    var res = await sb.from("sessions").select("*");
-    if (res.error) { setSyncStatus("error", res.error.message); return; }
-    sessions = res.data.map(rowToSession);
-    setSyncStatus("ok");
-    hasFetchedOnce = true;
-    document.getElementById("emptyStateBanner").style.display = sessions.length === 0 ? "flex" : "none";
+    setSyncStatus("connecting");
+    try {
+      var res = await fetch(CSV_URL + "&t=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      var text = await res.text();
+      var rows = parseCSV(text);
+      sessions = rowsToSessions(rows);
+      TYPE_ORDER.length = 0;
+      ["Nap", "Bedtime", "Night wake-up"].forEach(ensureTypeKnown);
+      setSyncStatus("ok");
+    } catch (err) {
+      setSyncStatus("error", err.message);
+    }
     renderAll();
   }
-
-  async function loadSampleData() {
-    if (!sb) return;
-    var loadBtn = document.getElementById("loadSampleBtn");
-    loadBtn.disabled = true;
-    loadBtn.textContent = "Loading…";
-    var rows = SAMPLE_ROWS.map(function (r) {
-      return { date: r[0], start_time: r[1], end_time: r[2] || null, event_type: r[3], carer: r[4], method: r[5], notes: r[6] };
-    });
-    var res = await sb.from("sessions").insert(rows);
-    loadBtn.disabled = false;
-    loadBtn.textContent = "Load 19 sample sessions";
-    if (res.error) { alert("Couldn't load sample data: " + res.error.message); return; }
-    await fetchSessions();
-  }
-  document.getElementById("loadSampleBtn").addEventListener("click", loadSampleData);
-
-  function subscribeRealtime() {
-    if (!sb) return;
-    sb.channel("sessions-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "sessions" }, function () { fetchSessions(); })
-      .subscribe();
-  }
+  document.getElementById("retryBtn").addEventListener("click", fetchSessions);
 
   function startPolling() {
-    if (!sb) return;
-    setInterval(function () {
-      if (!document.hidden) fetchSessions();
-    }, 45000);
+    setInterval(function () { if (!document.hidden) fetchSessions(); }, POLL_MS);
   }
 
   /* ---------- time helpers ---------- */
@@ -707,6 +662,7 @@
     return h12 + ":" + m + " " + ap;
   }
   function timeRangeLabel(s) {
+    if (!s.startTime) return "–";
     if (!s.endTime) return fmtTime12(s.startTime);
     return fmtTime12(s.startTime) + " – " + fmtTime12(s.endTime);
   }
@@ -720,7 +676,7 @@
   }
   function daysAgo(iso) {
     var d = new Date(iso + "T00:00:00");
-    var now = new Date(); now.setHours(0,0,0,0);
+    var now = new Date(); now.setHours(0, 0, 0, 0);
     return Math.round((now - d) / 86400000);
   }
 
@@ -735,10 +691,6 @@
     var idx = TYPE_ORDER.indexOf(type);
     return TYPE_COLOR_VARS[idx % TYPE_COLOR_VARS.length];
   }
-  function cssVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  }
-  // seed the canonical order first so colors stay stable across reloads
   ["Nap", "Bedtime", "Night wake-up"].forEach(ensureTypeKnown);
 
   /* ---------- filters ---------- */
@@ -751,27 +703,14 @@
     tableCount: document.getElementById("tableCount"),
     kpiRow: document.getElementById("kpiRow"),
     tableBody: document.getElementById("tableBody"),
-    tooltip: document.getElementById("tooltip"),
-    modalOverlay: document.getElementById("modalOverlay"),
-    sessionForm: document.getElementById("sessionForm"),
-    modalTitle: document.getElementById("modalTitle"),
-    deleteBtn: document.getElementById("deleteBtn"),
-    carerOptions: document.getElementById("carerOptions")
+    tooltip: document.getElementById("tooltip")
   };
 
   function populateFilterOptions() {
     var types = uniqueSorted(sessions.map(function (s) { return s.eventType; }));
     var carers = uniqueSorted(sessions.map(function (s) { return s.carer; }).filter(function (c) { return c && c !== "-"; }));
-
     fillSelect(els.filterType, ["all"].concat(types), function (v) { return v === "all" ? "All types" : v; });
     fillSelect(els.filterCarer, ["all"].concat(carers), function (v) { return v === "all" ? "All carers" : v; });
-
-    els.carerOptions.innerHTML = "";
-    carers.forEach(function (c) {
-      var opt = document.createElement("option");
-      opt.value = c;
-      els.carerOptions.appendChild(opt);
-    });
   }
   function fillSelect(select, values, labelFn) {
     var current = select.value;
@@ -822,7 +761,6 @@
   function renderKPIs(data) {
     var withDuration = data.filter(function (s) { return durationOf(s) != null; });
     var avg = withDuration.length ? Math.round(withDuration.reduce(function (a, s) { return a + durationOf(s); }, 0) / withDuration.length) : null;
-
     var wakeups7 = data.filter(function (s) { return s.eventType === "Night wake-up" && daysAgo(s.date) < 7; }).length;
 
     var carerCounts = {};
@@ -919,7 +857,7 @@
     mark.classList.add("bar-mark");
     mark.addEventListener("pointermove", function (e) { mark.classList.add("hovered"); showTooltip(e, tooltipHtml); });
     mark.addEventListener("pointerleave", function () { mark.classList.remove("hovered"); hideTooltip(); });
-    mark.addEventListener("focus", function (e) {
+    mark.addEventListener("focus", function () {
       mark.classList.add("hovered");
       var box = mark.getBoundingClientRect();
       showTooltip({ clientX: box.left + box.width / 2, clientY: box.top }, tooltipHtml);
@@ -1233,8 +1171,8 @@
   function renderTable(data) {
     var sorted = data.slice().sort(function (a, b) {
       var av, bv;
-      if (sort.key === "date") { av = a.date + a.startTime; bv = b.date + b.startTime; }
-      else if (sort.key === "time") { av = a.startTime; bv = b.startTime; }
+      if (sort.key === "date") { av = a.date + (a.startTime || ""); bv = b.date + (b.startTime || ""); }
+      else if (sort.key === "time") { av = a.startTime || ""; bv = b.startTime || ""; }
       else if (sort.key === "duration") { av = durationOf(a) == null ? -1 : durationOf(a); bv = durationOf(b) == null ? -1 : durationOf(b); }
       else { av = (a[sort.key] || "").toLowerCase(); bv = (b[sort.key] || "").toLowerCase(); }
       if (av < bv) return sort.dir === "asc" ? -1 : 1;
@@ -1247,7 +1185,7 @@
       var tr = document.createElement("tr");
       tr.className = "empty-row";
       var emptyCell = document.createElement("td");
-      emptyCell.colSpan = 8;
+      emptyCell.colSpan = 7;
       emptyCell.textContent = "No sessions match the current filters.";
       tr.appendChild(emptyCell);
       els.tableBody.appendChild(tr);
@@ -1255,10 +1193,10 @@
     }
 
     sorted.forEach(function (s) {
-      var tr = document.createElement("tr");
+      var row = document.createElement("tr");
 
-      tr.appendChild(td(fmtDateLabel(s.date)));
-      var tCell = td(timeRangeLabel(s)); tCell.className = "time-cell"; tr.appendChild(tCell);
+      row.appendChild(td(fmtDateLabel(s.date)));
+      var tCell = td(timeRangeLabel(s)); tCell.className = "time-cell"; row.appendChild(tCell);
 
       var typeCell = document.createElement("td");
       var badge = document.createElement("span"); badge.className = "type-badge";
@@ -1267,25 +1205,15 @@
       var typeText = document.createElement("span"); typeText.textContent = s.eventType;
       badge.appendChild(typeText);
       typeCell.appendChild(badge);
-      tr.appendChild(typeCell);
+      row.appendChild(typeCell);
 
-      tr.appendChild(td(s.carer || "–"));
-      var durCell = td(fmtDuration(durationOf(s))); durCell.className = "time-cell"; tr.appendChild(durCell);
+      row.appendChild(td(s.carer || "–"));
+      var durCell = td(fmtDuration(durationOf(s))); durCell.className = "time-cell"; row.appendChild(durCell);
 
-      var methodCell = td(s.method || ""); methodCell.className = "method-cell"; tr.appendChild(methodCell);
-      var notesCell = td(s.notes || ""); notesCell.className = "notes-cell"; tr.appendChild(notesCell);
+      var methodCell = td(s.method || ""); methodCell.className = "method-cell"; row.appendChild(methodCell);
+      var notesCell = td(s.notes || ""); notesCell.className = "notes-cell"; row.appendChild(notesCell);
 
-      var actionsCell = document.createElement("td");
-      var actions = document.createElement("div"); actions.className = "row-actions";
-      var editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", function () { openModal(s.id); });
-      var delBtn = document.createElement("button"); delBtn.type = "button"; delBtn.textContent = "Delete"; delBtn.className = "del";
-      delBtn.addEventListener("click", function () { deleteSession(s.id); });
-      actions.appendChild(editBtn); actions.appendChild(delBtn);
-      actionsCell.appendChild(actions);
-      tr.appendChild(actionsCell);
-
-      els.tableBody.appendChild(tr);
+      els.tableBody.appendChild(row);
     });
   }
   function td(text) { var el = document.createElement("td"); el.textContent = text; return el; }
@@ -1320,115 +1248,12 @@
     renderTable(data);
   }
 
-  /* ---------- modal / CRUD ---------- */
-  var f = {
-    date: document.getElementById("f-date"),
-    type: document.getElementById("f-type"),
-    typeOtherWrap: document.getElementById("f-type-other-wrap"),
-    typeOther: document.getElementById("f-type-other"),
-    start: document.getElementById("f-start"),
-    end: document.getElementById("f-end"),
-    carer: document.getElementById("f-carer"),
-    method: document.getElementById("f-method"),
-    notes: document.getElementById("f-notes")
-  };
-  var durationHint = document.getElementById("durationHint");
-
-  function openModal(id) {
-    editingId = id || null;
-    var s = id ? sessions.find(function (x) { return x.id === id; }) : null;
-
-    els.modalTitle.textContent = s ? "Edit session" : "Log a session";
-    els.deleteBtn.style.display = s ? "inline-flex" : "none";
-
-    if (s) {
-      f.date.value = s.date;
-      var known = ["Nap", "Bedtime", "Night wake-up"];
-      if (known.indexOf(s.eventType) !== -1) { f.type.value = s.eventType; f.typeOtherWrap.style.display = "none"; }
-      else { f.type.value = "__other"; f.typeOtherWrap.style.display = "block"; f.typeOther.value = s.eventType; }
-      f.start.value = s.startTime || "";
-      f.end.value = s.endTime || "";
-      f.carer.value = s.carer || "";
-      f.method.value = s.method || "";
-      f.notes.value = s.notes || "";
-    } else {
-      els.sessionForm.reset();
-      f.date.value = new Date().toISOString().slice(0, 10);
-      f.type.value = "Nap";
-      f.typeOtherWrap.style.display = "none";
-    }
-    updateDurationHint();
-    els.modalOverlay.classList.add("open");
-    f.date.focus();
-  }
-  function closeModal() {
-    els.modalOverlay.classList.remove("open");
-    editingId = null;
-  }
-
-  f.type.addEventListener("change", function () {
-    f.typeOtherWrap.style.display = f.type.value === "__other" ? "block" : "none";
-  });
-  [f.start, f.end].forEach(function (el) { el.addEventListener("change", updateDurationHint); });
-  function updateDurationHint() {
-    if (!f.start.value) { durationHint.textContent = ""; return; }
-    if (!f.end.value) { durationHint.textContent = "No end time — settle duration won't be tracked for this session."; return; }
-    var start = toMinutes(f.start.value), end = toMinutes(f.end.value);
-    if (end < start) end += 24 * 60;
-    durationHint.textContent = "Settle time: " + fmtDuration(end - start) + (end - start > 240 ? " — check the times if that looks too long." : "");
-  }
-
-  document.getElementById("addBtn").addEventListener("click", function () { openModal(null); });
-  document.getElementById("cancelBtn").addEventListener("click", closeModal);
-  els.modalOverlay.addEventListener("click", function (e) { if (e.target === els.modalOverlay) closeModal(); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && els.modalOverlay.classList.contains("open")) closeModal(); });
-
-  els.deleteBtn.addEventListener("click", function () {
-    if (editingId) deleteSession(editingId);
-    closeModal();
-  });
-
-  async function deleteSession(id) {
-    if (!confirm("Delete this session? This can't be undone.")) return;
-    if (!sb) { alert("Not connected to the shared database yet."); return; }
-    var res = await sb.from("sessions").delete().eq("id", id);
-    if (res.error) { alert("Couldn't delete: " + res.error.message); return; }
-    await fetchSessions();
-  }
-
-  els.sessionForm.addEventListener("submit", async function (e) {
-    e.preventDefault();
-    if (!sb) { alert("Not connected to the shared database yet."); return; }
-    var type = f.type.value === "__other" ? (f.typeOther.value.trim() || "Other") : f.type.value;
-    var row = sessionToRow({
-      date: f.date.value,
-      startTime: f.start.value,
-      endTime: f.end.value || null,
-      eventType: type,
-      carer: f.carer.value.trim(),
-      method: f.method.value.trim(),
-      notes: f.notes.value.trim()
-    });
-
-    var saveBtn = els.sessionForm.querySelector("button[type=submit]");
-    saveBtn.disabled = true;
-    var res = editingId
-      ? await sb.from("sessions").update(row).eq("id", editingId)
-      : await sb.from("sessions").insert(row);
-    saveBtn.disabled = false;
-
-    if (res.error) { alert("Couldn't save: " + res.error.message); return; }
-    ensureTypeKnown(type);
-    closeModal();
-    await fetchSessions();
-  });
-
   /* ---------- export ---------- */
   document.getElementById("exportBtn").addEventListener("click", function () {
     var header = ["Date", "Start", "End", "Event type", "Carer", "How he settled", "Notes", "Settle time (min)"];
-    var rows = sessions.slice().sort(function (a, b) { return (a.date + a.startTime).localeCompare(b.date + b.startTime); })
+    var rows = sessions.slice().sort(function (a, b) { return (a.date + (a.startTime || "")).localeCompare(b.date + (b.startTime || "")); })
       .map(function (s) {
-        return [s.date, s.startTime, s.endTime || "", s.eventType, s.carer, s.method, s.notes, durationOf(s) == null ? "" : String(durationOf(s))];
+        return [s.date, s.startTime || "", s.endTime || "", s.eventType, s.carer, s.method, s.notes, durationOf(s) == null ? "" : String(durationOf(s))];
       });
     var csv = [header].concat(rows).map(function (row) {
       return row.map(csvCell).join(",");
@@ -1449,7 +1274,7 @@
     return v;
   }
 
-  /* ---------- name, theme, banner ---------- */
+  /* ---------- name, theme ---------- */
   var babyNameInput = document.getElementById("babyName");
   babyNameInput.value = localStorage.getItem(NAME_KEY) || "Baby";
   babyNameInput.addEventListener("change", function () {
@@ -1481,15 +1306,8 @@
 
   window.addEventListener("resize", debounce(function () { if (!document.hidden) renderAll(); }, 200));
 
-  if (!sb) {
-    setSyncStatus("unconfigured");
-    renderAll();
-  } else {
-    setSyncStatus("connecting");
-    fetchSessions();
-    subscribeRealtime();
-    startPolling();
-  }
+  fetchSessions();
+  startPolling();
 })();
 </script>
 </body>
