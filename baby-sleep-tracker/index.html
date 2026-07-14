@@ -1530,7 +1530,7 @@
     if (!types.length) { scroll.innerHTML = '<p class="empty-chart">No sessions with a recorded time in this range.</p>'; return; }
 
     var padL = 56, padR = 16, padT = 10, padB = 30;
-    var plotH = 420;
+    var plotH = 24 * 20;
     var columnW = 84;
     var plotW = types.length * columnW;
     var w = padL + plotW + padR, h = padT + plotH + padB;
@@ -1540,7 +1540,7 @@
     for (var hh = 0; hh <= 24; hh += 1) {
       var gy = padT + (hh / 24) * plotH;
       svg.appendChild(svgEl("line", { class: "grid-line", x1: padL, x2: padL + plotW, y1: gy, y2: gy }));
-      if (hh < 24 && hh % 4 === 0) {
+      if (hh < 24) {
         var lbl = svgEl("text", { x: padL - 8, y: gy + 3, "text-anchor": "end", class: "axis-label" });
         lbl.textContent = axisHoursToLabel(hh);
         svg.appendChild(lbl);
