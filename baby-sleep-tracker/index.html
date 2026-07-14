@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Sleep &amp; Settling Tracker</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%99%3C/text%3E%3C/svg%3E">
 <style>
@@ -73,49 +73,29 @@
   }
 
   * , *::before, *::after { box-sizing: border-box; }
+  html { font-size: 17px; }
   html, body { margin: 0; padding: 0; }
   body {
     background: var(--page-plane);
     color: var(--text-primary);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
-    padding-bottom: 60px;
   }
   a { color: inherit; }
 
-  .app-shell { max-width: 1160px; margin: 0 auto; padding: 28px 20px 0; }
+  .app-shell { max-width: 560px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
 
-  header.top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 22px;
+  .top-bar {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+    padding: 16px 18px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
   }
-  header.top h1 {
-    font-size: clamp(1.4rem, 3vw, 1.9rem);
-    margin: 0 0 4px;
-    letter-spacing: -0.01em;
-  }
-  header.top .subtitle {
-    color: var(--text-secondary);
-    font-size: 0.92rem;
-    margin: 0;
-  }
-  .name-edit {
-    background: transparent;
-    border: none;
-    border-bottom: 1px dashed var(--border);
-    color: inherit;
-    font: inherit;
-    font-weight: 600;
-    padding: 0 2px;
-    max-width: 220px;
-  }
-  .name-edit:focus { outline: none; border-bottom-color: var(--series-1); }
-
-  .top-actions { display: flex; gap: 8px; align-items: center; }
+  .top-bar-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .top-bar-title .app-icon { font-size: 1.6rem; flex: none; }
+  .top-bar-title h1 { font-size: 1.15rem; margin: 0; font-weight: 800; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   button, select, input {
     font: inherit;
@@ -125,14 +105,16 @@
   .btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: 7px;
     background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text-primary);
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: 0.88rem;
-    font-weight: 600;
+    border-radius: 11px;
+    padding: 11px 18px;
+    min-height: 46px;
+    font-size: 0.96rem;
+    font-weight: 700;
     cursor: pointer;
     text-decoration: none;
   }
@@ -147,113 +129,143 @@
   .btn-ghost {
     background: transparent;
     border-color: transparent;
-    padding: 8px 10px;
   }
-  .btn-icon { width: 34px; height: 34px; padding: 0; justify-content: center; }
+  .btn-icon { width: 44px; min-height: 44px; padding: 0; flex: none; }
+  .btn-block { width: 100%; margin-bottom: 10px; }
 
   .banner {
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 0.82rem;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 0.85rem;
     color: var(--text-secondary);
-    margin-bottom: 20px;
+    margin: 14px 18px 0;
     display: flex;
     gap: 10px;
     align-items: center;
   }
-  .banner button, .banner a.btn { margin-left: auto; flex: none; }
+  .banner button { margin-left: auto; flex: none; }
   .banner.error { border-color: var(--status-critical); }
   .banner code { background: var(--surface-1); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
 
   .sync-status {
-    font-size: 0.78rem;
+    font-size: 0.95rem;
     display: inline-flex;
     align-items: center;
     gap: 6px;
     color: var(--text-secondary);
-    padding: 0 6px;
+    flex: none;
   }
   .sync-status.ok { color: var(--status-good); }
   .sync-status.connecting { color: var(--text-muted); }
   .sync-status.error { color: var(--status-critical); }
 
   .filter-row {
-    display: flex;
+    display: none;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
-    margin-bottom: 20px;
+    padding: 14px 18px 0;
   }
   .filter-row select, .filter-row .search-input {
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 7px 10px;
-    font-size: 0.85rem;
+    border-radius: 9px;
+    padding: 8px 10px;
+    font-size: 0.86rem;
   }
-  .filter-row .search-input { min-width: 180px; }
-  .filter-row .spacer { flex: 1; }
-  .filter-count { font-size: 0.8rem; color: var(--text-muted); }
+  .filter-row .search-input { min-width: 160px; flex: 1; }
+  .filter-count { font-size: 0.8rem; color: var(--text-muted); width: 100%; margin-top: 2px; }
+
+  .pages { flex: 1; padding: 18px 18px calc(90px + env(safe-area-inset-bottom)); }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  .section-title { font-size: 1.05rem; font-weight: 800; margin: 24px 0 12px; }
+  .section-title:first-child { margin-top: 0; }
+
+  .cta-tile {
+    width: 100%;
+    display: flex; align-items: center; gap: 12px;
+    background: var(--series-1); color: #fff;
+    border: none; border-radius: 18px;
+    padding: 20px 22px;
+    font-size: 1.1rem; font-weight: 800;
+    cursor: pointer;
+    margin-bottom: 20px;
+    box-shadow: 0 6px 20px rgba(42,120,214,0.28);
+  }
+  .cta-tile .cta-icon { font-size: 1.6rem; }
+  .cta-tile:active { filter: brightness(0.95); }
 
   .kpi-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 12px;
-    margin-bottom: 22px;
   }
   .kpi-tile {
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 18px;
+    border-radius: 16px;
+    padding: 16px 16px;
   }
   .kpi-tile .label {
     font-size: 0.78rem;
     color: var(--text-secondary);
     margin-bottom: 6px;
+    font-weight: 600;
   }
   .kpi-tile .value {
-    font-size: 1.7rem;
-    font-weight: 600;
+    font-size: 1.9rem;
+    font-weight: 800;
     font-variant-numeric: proportional-nums;
     line-height: 1.1;
   }
   .kpi-tile .sub {
-    font-size: 0.76rem;
+    font-size: 0.74rem;
     color: var(--text-muted);
     margin-top: 4px;
   }
 
+  .recent-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border-radius: 16px; padding: 16px 18px; margin-bottom: 10px;
+    color: #fff;
+  }
+  .recent-card .rc-left { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; }
+  .recent-card .rc-icon { font-size: 1.6rem; flex: none; }
+  .recent-card .rc-text { min-width: 0; flex: 1 1 auto; }
+  .recent-card .rc-title { font-size: 1.02rem; font-weight: 800; }
+  .recent-card .rc-sub { font-size: 0.78rem; opacity: 0.92; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-card .rc-duration { font-size: 1rem; font-weight: 800; white-space: nowrap; flex: none; }
+
   .charts-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: 1fr;
     gap: 14px;
-    margin-bottom: 24px;
   }
   .chart-card {
     background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 18px 10px;
+    border-radius: 16px;
+    padding: 18px 18px 12px;
     margin: 0;
   }
-  .chart-card.wide { grid-column: 1 / -1; }
   .chart-card h2 {
-    font-size: 0.92rem;
+    font-size: 0.98rem;
     margin: 0 0 2px;
-    font-weight: 600;
+    font-weight: 700;
   }
   .chart-card .chart-caption {
-    font-size: 0.76rem;
+    font-size: 0.78rem;
     color: var(--text-muted);
     margin: 0 0 10px;
   }
   .chart-scroll { overflow-x: auto; }
   .chart-scroll svg { display: block; }
   .empty-chart {
-    font-size: 0.82rem;
+    font-size: 0.84rem;
     color: var(--text-muted);
     padding: 30px 0;
     text-align: center;
@@ -264,12 +276,11 @@
     flex-wrap: wrap;
     gap: 12px;
     margin-top: 8px;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     color: var(--text-secondary);
   }
   .legend-item { display: inline-flex; align-items: center; gap: 6px; }
   .legend-key { width: 14px; height: 3px; border-radius: 2px; flex: none; }
-  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
   svg text { fill: var(--text-muted); font-size: 10px; font-family: inherit; }
   .bar-mark { cursor: pointer; }
@@ -302,36 +313,65 @@
   .tooltip .t-value { font-weight: 700; }
   .tooltip .t-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
-  .table-card {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 18px;
-  }
   .table-header {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
   }
-  .table-header h2 { font-size: 0.95rem; margin: 0; }
+  .table-header h2 { font-size: 1.05rem; margin: 0; font-weight: 800; }
   .table-header .spacer { flex: 1; }
-  .table-scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; min-width: 700px; }
-  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--gridline); vertical-align: top; }
-  th { color: var(--text-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; white-space: nowrap; }
-  th:hover { color: var(--text-primary); }
-  td.notes-cell, td.method-cell { max-width: 260px; color: var(--text-secondary); }
-  td.time-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .log-sort-row { margin-bottom: 14px; }
+  .log-sort-row select {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+    padding: 8px 10px; font-size: 0.86rem;
+  }
   .type-badge { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .type-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  .empty-row td { text-align: center; color: var(--text-muted); padding: 30px 0; }
 
-  footer.app-footer {
-    max-width: 1160px; margin: 24px auto 0; padding: 0 20px;
-    font-size: 0.76rem; color: var(--text-muted);
+  .log-list { display: flex; flex-direction: column; gap: 10px; }
+  .log-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 15px 17px; }
+  .log-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 10px; }
+  .log-card-date { font-size: 0.8rem; color: var(--text-muted); font-weight: 700; flex: none; }
+  .log-card-time { font-size: 0.96rem; font-weight: 700; margin-bottom: 3px; }
+  .log-card-meta { font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 4px; }
+  .log-card-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 700; margin-top: 8px; margin-bottom: 2px; }
+  .log-card-method { font-size: 0.88rem; color: var(--text-primary); line-height: 1.4; }
+  .log-card-notes { font-size: 0.84rem; color: var(--text-secondary); line-height: 1.4; }
+
+  .settings-group { background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 4px 18px; margin-bottom: 18px; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid var(--gridline); gap: 12px; }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-row .settings-label { font-weight: 600; font-size: 0.98rem; }
+  .settings-row .name-edit {
+    text-align: right;
+    background: transparent; border: none; border-bottom: 1px dashed var(--border);
+    color: inherit; font: inherit; font-weight: 700;
+    padding: 0 2px; width: 130px;
   }
+  .settings-row .name-edit:focus { outline: none; border-bottom-color: var(--series-1); }
+  .app-footer-text { font-size: 0.78rem; color: var(--text-muted); margin: 4px 4px 0; line-height: 1.4; }
+
+  .bottom-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    max-width: 560px; margin: 0 auto;
+    display: flex;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .nav-btn {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: none; border: none; cursor: pointer;
+    padding: 10px 4px 8px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+  .nav-btn .nav-icon { font-size: 1.55rem; line-height: 1; }
+  .nav-btn.active { color: var(--series-1); }
 
   .modal-overlay {
     position: fixed; inset: 0;
@@ -346,41 +386,42 @@
   .modal-overlay.open { display: flex; }
   .modal {
     background: var(--surface-2);
-    border-radius: 14px;
-    padding: 22px 22px 18px;
+    border-radius: 18px;
+    padding: 22px 22px 20px;
     width: 100%;
     max-width: 480px;
     border: 1px solid var(--border);
   }
-  .modal h2 { margin: 0 0 6px; font-size: 1.05rem; }
-  .modal .modal-intro { font-size: 0.8rem; color: var(--text-secondary); margin: 0 0 16px; }
-  .field { margin-bottom: 13px; }
-  .field label { display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
+  .modal h2 { margin: 0 0 6px; font-size: 1.15rem; }
+  .modal .modal-intro { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 5px; font-weight: 600; }
   .field input, .field select, .field textarea {
     width: 100%;
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 0.88rem;
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-size: 0.98rem;
+    min-height: 46px;
   }
-  .field textarea { resize: vertical; min-height: 52px; }
+  .field textarea { resize: vertical; min-height: 58px; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .field-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
+  .field-hint { font-size: 0.74rem; color: var(--text-muted); margin-top: 4px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-  .modal-skip { text-align: center; margin-top: 14px; font-size: 0.78rem; }
+  .modal-skip { text-align: center; margin-top: 14px; font-size: 0.8rem; }
   .modal-skip a { color: var(--series-1); }
 
   .copy-panel { text-align: center; }
-  .copy-panel .big-check { font-size: 2.2rem; margin-bottom: 6px; }
-  .copy-panel ol { text-align: left; font-size: 0.86rem; color: var(--text-secondary); padding-left: 20px; margin: 14px 0; }
+  .copy-panel .big-check { font-size: 2.4rem; margin-bottom: 6px; }
+  .copy-panel ol { text-align: left; font-size: 0.88rem; color: var(--text-secondary); padding-left: 20px; margin: 14px 0; }
   .copy-panel ol li { margin-bottom: 6px; }
   .copy-preview {
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 0.76rem;
+    border-radius: 10px;
+    padding: 9px 11px;
+    font-size: 0.78rem;
     font-family: ui-monospace, monospace;
     color: var(--text-secondary);
     text-align: left;
@@ -392,12 +433,11 @@
   .copy-fallback.show { display: block; }
   .copy-fallback textarea {
     width: 100%; min-height: 60px;
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 10px; font-size: 0.78rem; font-family: ui-monospace, monospace;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 10px; font-size: 0.8rem; font-family: ui-monospace, monospace;
   }
 
-  @media (max-width: 760px) {
-    .charts-grid { grid-template-columns: 1fr; }
+  @media (max-width: 480px) {
     .field-row { grid-template-columns: 1fr; }
   }
 </style>
@@ -405,19 +445,12 @@
 <body>
 <div class="app-shell">
 
-  <header class="top">
-    <div>
-      <h1>🌙 Sleep &amp; Settling Tracker<br>
-        <span style="font-size:0.6em;font-weight:400;">for <input id="babyName" class="name-edit" value="Baby" aria-label="Baby's name"></span>
-      </h1>
-      <p class="subtitle">Every nap, bedtime and night wake-up — how it went, who was on duty, what helped.</p>
+  <header class="top-bar">
+    <div class="top-bar-title">
+      <span class="app-icon">🌙</span>
+      <h1 id="appTitle">Baby's Sleep Tracker</h1>
     </div>
-    <div class="top-actions">
-      <span class="sync-status" id="syncStatus">● Connecting…</span>
-      <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
-      <button class="btn" id="exportBtn">Export CSV</button>
-      <button class="btn btn-primary" id="addBtn">+ Log a session</button>
-    </div>
+    <span class="sync-status" id="syncStatus" title="Connecting…">●</span>
   </header>
 
   <div class="banner error" id="connectionBanner" style="display:none;">
@@ -425,7 +458,7 @@
     <button class="btn btn-ghost" id="retryBtn">Retry</button>
   </div>
 
-  <section class="filter-row" aria-label="Filters">
+  <div class="filter-row" id="filterRow" aria-label="Filters">
     <select id="filterRange" aria-label="Date range">
       <option value="all">All time</option>
       <option value="7">Last 7 days</option>
@@ -435,74 +468,105 @@
     <select id="filterType" aria-label="Event type"></select>
     <select id="filterCarer" aria-label="Carer"></select>
     <input type="search" id="filterSearch" class="search-input" placeholder="Search method or notes…" aria-label="Search method or notes">
-    <span class="spacer"></span>
     <span class="filter-count" id="filterCount"></span>
-  </section>
+  </div>
 
-  <section class="kpi-row" id="kpiRow"></section>
+  <main class="pages">
+    <section class="page active" id="page-home">
+      <button class="cta-tile" id="addBtn" type="button">
+        <span class="cta-icon">➕</span>
+        <span>Log a session</span>
+      </button>
 
-  <section class="charts-grid">
-    <figure class="chart-card wide" id="chartSessions">
-      <h2>Settle time per session</h2>
-      <p class="chart-caption">Minutes spent settling, in order — colored by event type.</p>
-      <div class="chart-scroll"></div>
-      <div class="legend"></div>
-    </figure>
+      <div class="kpi-row" id="kpiRow"></div>
 
-    <figure class="chart-card" id="chartAvgByType">
-      <h2>Average settle time by type</h2>
-      <p class="chart-caption">Mean minutes to settle, per event type.</p>
-      <div class="chart-scroll"></div>
-      <div class="legend"></div>
-    </figure>
+      <h2 class="section-title">Recent sessions</h2>
+      <div id="recentList"></div>
+    </section>
 
-    <figure class="chart-card" id="chartCarerBreakdown">
-      <h2>Who settles which events</h2>
-      <p class="chart-caption">Sessions handled by each carer, split by type.</p>
-      <div class="chart-scroll"></div>
-      <div class="legend"></div>
-    </figure>
+    <section class="page" id="page-charts">
+      <div class="charts-grid">
+        <figure class="chart-card" id="chartSessions">
+          <h2>Settle time per session</h2>
+          <p class="chart-caption">Minutes spent settling, in order — colored by event type.</p>
+          <div class="chart-scroll"></div>
+          <div class="legend"></div>
+        </figure>
 
-    <figure class="chart-card" id="chartWakeups">
-      <h2>Night wake-ups by day</h2>
-      <p class="chart-caption">Count of night wake-up events logged per day.</p>
-      <div class="chart-scroll"></div>
-    </figure>
+        <figure class="chart-card" id="chartAvgByType">
+          <h2>Average settle time by type</h2>
+          <p class="chart-caption">Mean minutes to settle, per event type.</p>
+          <div class="chart-scroll"></div>
+          <div class="legend"></div>
+        </figure>
 
-    <figure class="chart-card" id="chartTechniques">
-      <h2>Common settling techniques</h2>
-      <p class="chart-caption">Keywords found in "how he settled" — a session can use more than one.</p>
-      <div class="chart-scroll"></div>
-    </figure>
-  </section>
+        <figure class="chart-card" id="chartCarerBreakdown">
+          <h2>Who settles which events</h2>
+          <p class="chart-caption">Sessions handled by each carer, split by type.</p>
+          <div class="chart-scroll"></div>
+          <div class="legend"></div>
+        </figure>
 
-  <section class="table-card">
-    <div class="table-header">
-      <h2>Session log</h2>
-      <span class="spacer"></span>
-      <span class="filter-count" id="tableCount"></span>
-    </div>
-    <div class="table-scroll">
-      <table id="sessionsTable">
-        <thead>
-          <tr>
-            <th data-key="date">Date</th>
-            <th data-key="time">Time</th>
-            <th data-key="eventType">Type</th>
-            <th data-key="carer">Carer</th>
-            <th data-key="duration">Settle time</th>
-            <th data-key="method">How he settled</th>
-            <th data-key="notes">Notes</th>
-          </tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-      </table>
-    </div>
-  </section>
+        <figure class="chart-card" id="chartWakeups">
+          <h2>Night wake-ups by day</h2>
+          <p class="chart-caption">Count of night wake-up events logged per day.</p>
+          <div class="chart-scroll"></div>
+        </figure>
 
-  <footer class="app-footer">
-    Reads live from your Google Sheet — add a row there and it shows up here on the next refresh (~30s).
-  </footer>
+        <figure class="chart-card" id="chartTechniques">
+          <h2>Common settling techniques</h2>
+          <p class="chart-caption">Keywords found in "how he settled" — a session can use more than one.</p>
+          <div class="chart-scroll"></div>
+        </figure>
+      </div>
+    </section>
+
+    <section class="page" id="page-log">
+      <div class="table-header">
+        <h2>Session log</h2>
+        <span class="spacer"></span>
+        <span class="filter-count" id="tableCount"></span>
+      </div>
+      <div class="log-sort-row">
+        <select id="logSort" aria-label="Sort by">
+          <option value="date-desc">Newest first</option>
+          <option value="date-asc">Oldest first</option>
+          <option value="duration-desc">Longest settle time</option>
+        </select>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </section>
+
+    <section class="page" id="page-settings">
+      <h2 class="section-title">Settings</h2>
+      <div class="settings-group">
+        <div class="settings-row">
+          <span class="settings-label">Baby's name</span>
+          <input id="babyName" class="name-edit" value="Baby" aria-label="Baby's name">
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Theme</span>
+          <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Sync status</span>
+          <span class="sync-status" id="syncStatusDetail">● Connecting…</span>
+        </div>
+      </div>
+
+      <button class="btn btn-block" id="exportBtn" type="button">⬇️ &nbsp;Export CSV</button>
+      <a class="btn btn-block" id="settingsOpenSheetBtn" href="#" target="_blank" rel="noopener">📄 &nbsp;Open Google Sheet</a>
+
+      <p class="app-footer-text">Reads live from your Google Sheet — add a row there and it shows up here on the next refresh (~30s).</p>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-page="home" type="button"><span class="nav-icon">🏠</span><span>Home</span></button>
+    <button class="nav-btn" data-page="charts" type="button"><span class="nav-icon">📊</span><span>Charts</span></button>
+    <button class="nav-btn" data-page="log" type="button"><span class="nav-icon">📋</span><span>Log</span></button>
+    <button class="nav-btn" data-page="settings" type="button"><span class="nav-icon">⚙️</span><span>Settings</span></button>
+  </nav>
 </div>
 
 <div class="modal-overlay" id="modalOverlay">
@@ -621,10 +685,10 @@
 
   document.getElementById("skipToSheetLink").href = EDIT_URL;
   document.getElementById("copyPanelOpenSheetBtn").href = EDIT_URL;
+  document.getElementById("settingsOpenSheetBtn").href = EDIT_URL;
 
   /* ---------- state ---------- */
   var sessions = [];
-  var sort = { key: "date", dir: "desc" };
 
   /* ---------- CSV + column parsing ---------- */
   function parseCSV(text) {
@@ -758,15 +822,18 @@
 
   /* ---------- fetch + sync status ---------- */
   function setSyncStatus(state, message) {
-    var el = document.getElementById("syncStatus");
+    var dot = document.getElementById("syncStatus");
+    var detail = document.getElementById("syncStatusDetail");
     var banner = document.getElementById("connectionBanner");
     var bannerText = document.getElementById("connectionBannerText");
-    el.className = "sync-status " + state;
-    if (state === "ok") { el.textContent = "● Synced"; el.title = "Last read succeeded"; banner.style.display = "none"; }
-    else if (state === "connecting") { el.textContent = "● Connecting…"; el.title = ""; }
+    var label = state === "ok" ? "Synced" : state === "connecting" ? "Connecting…" : "Can't reach sheet";
+
+    dot.className = "sync-status " + state;
+    dot.title = label;
+    if (detail) { detail.className = "sync-status " + state; detail.textContent = "● " + label; }
+
+    if (state === "ok") { banner.style.display = "none"; }
     else if (state === "error") {
-      el.textContent = "● Can't reach sheet";
-      el.title = message || "";
       bannerText.textContent = "⚠️ Can't read the spreadsheet. Make sure it's shared as \"Anyone with the link\" → Viewer (Share button, top right of the sheet), then retry.";
       banner.style.display = "flex";
     }
@@ -852,6 +919,15 @@
   }
   ["Nap", "Bedtime", "Night wake-up"].forEach(ensureTypeKnown);
 
+  var TILE_COLORS = ["#2a78d6", "#159c6c", "#c98500", "#4a3aa7", "#c2410c"];
+  function tileColorFor(type) {
+    ensureTypeKnown(type);
+    var idx = TYPE_ORDER.indexOf(type);
+    return TILE_COLORS[idx % TILE_COLORS.length];
+  }
+  var TYPE_ICONS = { "Nap": "😴", "Bedtime": "🌙", "Night wake-up": "⏰" };
+  function iconForType(type) { return TYPE_ICONS[type] || "🍼"; }
+
   /* ---------- filters ---------- */
   var els = {
     filterRange: document.getElementById("filterRange"),
@@ -861,7 +937,6 @@
     filterCount: document.getElementById("filterCount"),
     tableCount: document.getElementById("tableCount"),
     kpiRow: document.getElementById("kpiRow"),
-    tableBody: document.getElementById("tableBody"),
     tooltip: document.getElementById("tooltip")
   };
 
@@ -938,8 +1013,8 @@
     var topCarer = Object.keys(carerCounts).sort(function (a, b) { return carerCounts[b] - carerCounts[a]; })[0];
 
     var tiles = [
-      { label: "Sessions logged", value: String(data.length), sub: data.length ? fmtDateLabel(minDate(data)) + " – " + fmtDateLabel(maxDate(data)) : "No data in range" },
-      { label: "Avg. settle time", value: avg != null ? fmtDuration(avg) : "–", sub: withDuration.length + " session" + (withDuration.length === 1 ? "" : "s") + " with a recorded end time" },
+      { label: "Sessions logged", value: String(data.length), sub: data.length ? fmtDateLabel(minDate(data)) + " – " + fmtDateLabel(maxDate(data)) : "No data yet" },
+      { label: "Avg. settle time", value: avg != null ? fmtDuration(avg) : "–", sub: withDuration.length + " with a recorded end time" },
       { label: "Night wake-ups (7d)", value: String(wakeups7), sub: "in the last 7 days" },
       { label: "Most active carer", value: topCarer || "–", sub: topCarer ? carerCounts[topCarer] + " session" + (carerCounts[topCarer] === 1 ? "" : "s") : "No carer data" }
     ];
@@ -957,6 +1032,39 @@
   }
   function minDate(data) { return data.map(function (s) { return s.date; }).sort()[0]; }
   function maxDate(data) { return data.map(function (s) { return s.date; }).sort().slice(-1)[0]; }
+
+  /* ---------- Home: recent sessions ---------- */
+  function renderRecentList() {
+    var container = document.getElementById("recentList");
+    var recent = sessions.slice().sort(function (a, b) {
+      return (b.date + (b.startTime || "")).localeCompare(a.date + (a.startTime || ""));
+    }).slice(0, 6);
+
+    container.innerHTML = "";
+    if (!recent.length) {
+      container.innerHTML = '<p class="empty-chart">No sessions yet — tap Log a session, or add one in the sheet.</p>';
+      return;
+    }
+    recent.forEach(function (s) {
+      var card = document.createElement("div");
+      card.className = "recent-card";
+      card.style.background = tileColorFor(s.eventType);
+
+      var left = document.createElement("div"); left.className = "rc-left";
+      var icon = document.createElement("span"); icon.className = "rc-icon"; icon.textContent = iconForType(s.eventType);
+      var textWrap = document.createElement("div"); textWrap.className = "rc-text";
+      var title = document.createElement("div"); title.className = "rc-title"; title.textContent = s.eventType;
+      var sub = document.createElement("div"); sub.className = "rc-sub";
+      sub.textContent = fmtDateLabel(s.date) + " · " + timeRangeLabel(s) + (s.carer ? " · " + s.carer : "");
+      textWrap.appendChild(title); textWrap.appendChild(sub);
+      left.appendChild(icon); left.appendChild(textWrap);
+
+      var dur = document.createElement("div"); dur.className = "rc-duration"; dur.textContent = fmtDuration(durationOf(s));
+
+      card.appendChild(left); card.appendChild(dur);
+      container.appendChild(card);
+    });
+  }
 
   /* ---------- SVG chart helpers ---------- */
   function svgEl(tag, attrs) {
@@ -1334,65 +1442,65 @@
     scroll.appendChild(svg);
   }
 
-  /* ---------- table ---------- */
-  function renderTable(data) {
+  /* ---------- session log (card list) ---------- */
+  var logSortSelect = document.getElementById("logSort");
+  logSortSelect.addEventListener("change", renderAll);
+
+  function renderLogList(data) {
+    var mode = logSortSelect.value;
     var sorted = data.slice().sort(function (a, b) {
-      var av, bv;
-      if (sort.key === "date") { av = a.date + (a.startTime || ""); bv = b.date + (b.startTime || ""); }
-      else if (sort.key === "time") { av = a.startTime || ""; bv = b.startTime || ""; }
-      else if (sort.key === "duration") { av = durationOf(a) == null ? -1 : durationOf(a); bv = durationOf(b) == null ? -1 : durationOf(b); }
-      else { av = (a[sort.key] || "").toLowerCase(); bv = (b[sort.key] || "").toLowerCase(); }
-      if (av < bv) return sort.dir === "asc" ? -1 : 1;
-      if (av > bv) return sort.dir === "asc" ? 1 : -1;
-      return 0;
+      if (mode === "date-asc") return (a.date + (a.startTime || "")).localeCompare(b.date + (b.startTime || ""));
+      if (mode === "duration-desc") {
+        var da = durationOf(a) == null ? -1 : durationOf(a), db = durationOf(b) == null ? -1 : durationOf(b);
+        return db - da;
+      }
+      return (b.date + (b.startTime || "")).localeCompare(a.date + (a.startTime || ""));
     });
 
-    els.tableBody.innerHTML = "";
+    var container = document.getElementById("logList");
+    container.innerHTML = "";
     if (!sorted.length) {
-      var tr = document.createElement("tr");
-      tr.className = "empty-row";
-      var emptyCell = document.createElement("td");
-      emptyCell.colSpan = 7;
-      emptyCell.textContent = "No sessions match the current filters.";
-      tr.appendChild(emptyCell);
-      els.tableBody.appendChild(tr);
+      container.innerHTML = '<p class="empty-chart">No sessions match the current filters.</p>';
       return;
     }
 
     sorted.forEach(function (s) {
-      var row = document.createElement("tr");
+      var card = document.createElement("div");
+      card.className = "log-card";
 
-      row.appendChild(td(fmtDateLabel(s.date)));
-      var tCell = td(timeRangeLabel(s)); tCell.className = "time-cell"; row.appendChild(tCell);
-
-      var typeCell = document.createElement("td");
+      var top = document.createElement("div"); top.className = "log-card-top";
       var badge = document.createElement("span"); badge.className = "type-badge";
       var dot = document.createElement("span"); dot.className = "type-dot"; dot.style.background = "var(" + typeColorVar(s.eventType) + ")";
       badge.appendChild(dot);
       var typeText = document.createElement("span"); typeText.textContent = s.eventType;
       badge.appendChild(typeText);
-      typeCell.appendChild(badge);
-      row.appendChild(typeCell);
+      var dateEl = document.createElement("span"); dateEl.className = "log-card-date"; dateEl.textContent = fmtDateLabel(s.date);
+      top.appendChild(badge); top.appendChild(dateEl);
+      card.appendChild(top);
 
-      row.appendChild(td(s.carer || "–"));
-      var durCell = td(fmtDuration(durationOf(s))); durCell.className = "time-cell"; row.appendChild(durCell);
+      var timeEl = document.createElement("div"); timeEl.className = "log-card-time";
+      var dur = durationOf(s);
+      timeEl.textContent = timeRangeLabel(s) + (dur != null ? " · " + fmtDuration(dur) : "");
+      card.appendChild(timeEl);
 
-      var methodCell = td(s.method || ""); methodCell.className = "method-cell"; row.appendChild(methodCell);
-      var notesCell = td(s.notes || ""); notesCell.className = "notes-cell"; row.appendChild(notesCell);
+      if (s.carer) {
+        var carerEl = document.createElement("div"); carerEl.className = "log-card-meta"; carerEl.textContent = "Carer: " + s.carer;
+        card.appendChild(carerEl);
+      }
+      if (s.method) {
+        var mLabel = document.createElement("div"); mLabel.className = "log-card-label"; mLabel.textContent = "How he settled";
+        var mText = document.createElement("div"); mText.className = "log-card-method"; mText.textContent = s.method;
+        card.appendChild(mLabel); card.appendChild(mText);
+      }
+      if (s.notes) {
+        var nLabel = document.createElement("div"); nLabel.className = "log-card-label"; nLabel.textContent = "Notes";
+        var nText = document.createElement("div"); nText.className = "log-card-notes"; nText.textContent = s.notes;
+        card.appendChild(nLabel); card.appendChild(nText);
+      }
 
-      els.tableBody.appendChild(row);
+      container.appendChild(card);
     });
   }
-  function td(text) { var el = document.createElement("td"); el.textContent = text; return el; }
-
-  document.querySelectorAll("#sessionsTable th[data-key]").forEach(function (th) {
-    th.addEventListener("click", function () {
-      var key = th.getAttribute("data-key");
-      if (sort.key === key) sort.dir = sort.dir === "asc" ? "desc" : "asc";
-      else { sort.key = key; sort.dir = "asc"; }
-      renderAll();
-    });
-  });
 
   function esc(str) {
     var div = document.createElement("div");
@@ -1406,13 +1514,14 @@
     var data = filteredSessions();
     els.filterCount.textContent = data.length + " of " + sessions.length + " sessions";
     els.tableCount.textContent = data.length + " session" + (data.length === 1 ? "" : "s");
-    renderKPIs(data);
+    renderKPIs(sessions);
+    renderRecentList();
     renderSessionsChart(data);
     renderAvgByType(data);
     renderCarerBreakdown(data);
     renderWakeupsByDay(data);
     renderTechniques(data);
-    renderTable(data);
+    renderLogList(data);
   }
 
   /* ---------- export ---------- */
@@ -1536,14 +1645,17 @@
 
   /* ---------- name, theme ---------- */
   var babyNameInput = document.getElementById("babyName");
+  var appTitle = document.getElementById("appTitle");
+  function updateAppTitle() {
+    var name = babyNameInput.value.trim() || "Baby";
+    appTitle.textContent = name + "'s Sleep Tracker";
+  }
   babyNameInput.value = localStorage.getItem(NAME_KEY) || "Baby";
+  updateAppTitle();
+  babyNameInput.addEventListener("input", updateAppTitle);
   babyNameInput.addEventListener("change", function () {
     localStorage.setItem(NAME_KEY, babyNameInput.value.trim() || "Baby");
   });
-  babyNameInput.addEventListener("input", function () {
-    babyNameInput.style.width = Math.max(56, babyNameInput.value.length * 13 + 14) + "px";
-  });
-  babyNameInput.dispatchEvent(new Event("input"));
 
   var themeToggle = document.getElementById("themeToggle");
   var savedTheme = localStorage.getItem(THEME_KEY);
@@ -1563,6 +1675,21 @@
     themeToggle.textContent = current === "dark" ? "🌙" : current === "light" ? "☀️" : "◐";
     themeToggle.title = "Theme: " + (current || "system");
   }
+
+  /* ---------- bottom-nav page switching ---------- */
+  var navButtons = document.querySelectorAll(".nav-btn");
+  var pageSections = document.querySelectorAll(".page");
+  var filterRowEl = document.getElementById("filterRow");
+  function showPage(name) {
+    pageSections.forEach(function (p) { p.classList.toggle("active", p.id === "page-" + name); });
+    navButtons.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-page") === name); });
+    filterRowEl.style.display = (name === "charts" || name === "log") ? "flex" : "none";
+    window.scrollTo(0, 0);
+  }
+  navButtons.forEach(function (b) {
+    b.addEventListener("click", function () { showPage(b.getAttribute("data-page")); });
+  });
+  showPage("home");
 
   window.addEventListener("resize", debounce(function () { if (!document.hidden) renderAll(); }, 200));
 
