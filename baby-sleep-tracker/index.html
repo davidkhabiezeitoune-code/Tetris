@@ -543,7 +543,18 @@
 
     <div class="field">
       <label for="f-carer">Carer</label>
-      <input type="text" id="f-carer" list="carerOptions" placeholder="Rosie, Dave, Pia, or “-” for self-settled">
+      <select id="f-carer" required>
+        <option value="" disabled selected>Select carer…</option>
+        <option value="Rosie">Rosie</option>
+        <option value="Dave">Dave</option>
+        <option value="Pia">Pia</option>
+        <option value="Felix">Felix (self-settled)</option>
+        <option value="__other">Other…</option>
+      </select>
+    </div>
+    <div class="field" id="f-carer-other-wrap" style="display:none;">
+      <label for="f-carer-other">Carer's name</label>
+      <input type="text" id="f-carer-other" list="carerOptions" placeholder="e.g. Grandma">
       <datalist id="carerOptions"></datalist>
     </div>
 
@@ -862,7 +873,7 @@
 
     var carerOptions = document.getElementById("carerOptions");
     carerOptions.innerHTML = "";
-    carers.forEach(function (c) {
+    carers.filter(function (c) { return STANDARD_CARERS.indexOf(c) === -1; }).forEach(function (c) {
       var opt = document.createElement("option");
       opt.value = c;
       carerOptions.appendChild(opt);
@@ -1431,6 +1442,7 @@
   }
 
   /* ---------- log-a-session modal (copy-to-paste, no direct write) ---------- */
+  var STANDARD_CARERS = ["Rosie", "Dave", "Pia", "Felix"];
   var modalOverlay = document.getElementById("modalOverlay");
   var sessionForm = document.getElementById("sessionForm");
   var copyPanel = document.getElementById("copyPanel");
@@ -1441,6 +1453,8 @@
   var fStart = document.getElementById("f-start");
   var fEnd = document.getElementById("f-end");
   var fCarer = document.getElementById("f-carer");
+  var fCarerOtherWrap = document.getElementById("f-carer-other-wrap");
+  var fCarerOther = document.getElementById("f-carer-other");
   var fMethod = document.getElementById("f-method");
   var fNotes = document.getElementById("f-notes");
 
@@ -1455,6 +1469,7 @@
     fDate.value = new Date().toISOString().slice(0, 10);
     fType.value = "Nap time";
     fTypeOtherWrap.style.display = "none";
+    fCarerOtherWrap.style.display = "none";
     sessionForm.style.display = "block";
     copyPanel.style.display = "none";
     modalOverlay.classList.add("open");
@@ -1473,6 +1488,10 @@
   fType.addEventListener("change", function () {
     fTypeOtherWrap.style.display = fType.value === "__other" ? "block" : "none";
   });
+  fCarer.addEventListener("change", function () {
+    fCarerOtherWrap.style.display = fCarer.value === "__other" ? "block" : "none";
+    if (fCarer.value === "__other") fCarerOther.focus();
+  });
 
   function copyToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1486,7 +1505,7 @@
     var type = fType.value === "__other" ? (fTypeOther.value.trim() || "Other") : fType.value;
     var dateLabel = fmtDateForSheet(fDate.value);
     var timeLabel = fStart.value ? (fEnd.value ? (fStart.value + "-" + fEnd.value) : fStart.value) : "";
-    var carer = fCarer.value.trim();
+    var carer = fCarer.value === "__other" ? fCarerOther.value.trim() : fCarer.value;
     var method = fMethod.value.trim();
     var notes = fNotes.value.trim();
     var fields = [dateLabel, timeLabel, type, carer, method, notes];
