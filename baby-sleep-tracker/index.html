@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sleep &amp; Settling Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%99%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #ffffff;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --success:        #006300;
+    --series-1:       #2a78d6; /* blue   - Nap */
+    --series-2:       #1baf7a; /* aqua   - Bedtime */
+    --series-3:       #eda100; /* yellow - Night wake-up */
+    --series-4:       #008300; /* green  - overflow */
+    --series-5:       #4a3aa7; /* violet - overflow */
+    --sequential:      #2a78d6;
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-critical: #d03b3b;
+    --overlay:         rgba(11,11,11,0.45);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-2:      #212120;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --success:        #0ca30c;
+      --series-1:       #3987e5;
+      --series-2:       #199e70;
+      --series-3:       #c98500;
+      --series-4:       #008300;
+      --series-5:       #9085e9;
+      --sequential:      #3987e5;
+      --overlay:         rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-2:      #212120;
+    --page-plane:     #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --success:        #0ca30c;
+    --series-1:       #3987e5;
+    --series-2:       #199e70;
+    --series-3:       #c98500;
+    --series-4:       #008300;
+    --series-5:       #9085e9;
+    --sequential:      #3987e5;
+    --overlay:         rgba(0,0,0,0.6);
+  }
+
+  * , *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page-plane);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 60px;
+  }
+  a { color: inherit; }
+
+  .app-shell { max-width: 1160px; margin: 0 auto; padding: 28px 20px 0; }
+
+  header.top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+  }
+  header.top h1 {
+    font-size: clamp(1.4rem, 3vw, 1.9rem);
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  header.top .subtitle {
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    margin: 0;
+  }
+  .name-edit {
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed var(--border);
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    padding: 0 2px;
+    max-width: 220px;
+  }
+  .name-edit:focus { outline: none; border-bottom-color: var(--series-1); }
+
+  .top-actions { display: flex; gap: 8px; align-items: center; }
+
+  button, select, input {
+    font: inherit;
+    color: inherit;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--series-1); }
+  .btn:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  .btn-primary {
+    background: var(--series-1);
+    border-color: var(--series-1);
+    color: #fff;
+  }
+  .btn-primary:hover { filter: brightness(1.06); }
+  .btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    padding: 8px 10px;
+  }
+  .btn-icon { width: 34px; height: 34px; padding: 0; justify-content: center; }
+  .btn-danger { color: var(--status-critical); }
+
+  .banner {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .banner button { margin-left: auto; }
+
+  .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .filter-row select, .filter-row .search-input {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 0.85rem;
+  }
+  .filter-row .search-input { min-width: 180px; }
+  .filter-row .spacer { flex: 1; }
+  .filter-count { font-size: 0.8rem; color: var(--text-muted); }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+  .kpi-tile {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .kpi-tile .label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .kpi-tile .value {
+    font-size: 1.7rem;
+    font-weight: 600;
+    font-variant-numeric: proportional-nums;
+    line-height: 1.1;
+  }
+  .kpi-tile .sub {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .chart-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px 10px;
+    margin: 0;
+  }
+  .chart-card.wide { grid-column: 1 / -1; }
+  .chart-card h2 {
+    font-size: 0.92rem;
+    margin: 0 0 2px;
+    font-weight: 600;
+  }
+  .chart-card .chart-caption {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+  }
+  .chart-scroll { overflow-x: auto; }
+  .chart-scroll svg { display: block; }
+  .empty-chart {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    padding: 30px 0;
+    text-align: center;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+  }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-key { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+  svg text { fill: var(--text-muted); font-size: 10px; font-family: inherit; }
+  .bar-mark { cursor: pointer; }
+  .bar-mark:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+  .bar-mark.hovered { filter: brightness(1.12); }
+  .grid-line { stroke: var(--gridline); stroke-width: 1; }
+  .baseline-line { stroke: var(--baseline); stroke-width: 1; }
+  .axis-label { fill: var(--text-muted); }
+  .value-label { fill: var(--text-secondary); font-weight: 600; }
+
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--text-primary);
+    color: var(--surface-1);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    max-width: 240px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.1s ease, transform 0.1s ease;
+    z-index: 50;
+  }
+  .tooltip.visible { opacity: 1; transform: translateY(0); }
+  .tooltip .t-title { font-weight: 700; margin-bottom: 3px; }
+  .tooltip .t-row { display: flex; gap: 6px; }
+  .tooltip .t-value { font-weight: 700; }
+  .tooltip .t-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+  .table-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .table-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .table-header h2 { font-size: 0.95rem; margin: 0; }
+  .table-header .spacer { flex: 1; }
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; min-width: 760px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--gridline); vertical-align: top; }
+  th { color: var(--text-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; white-space: nowrap; }
+  th:hover { color: var(--text-primary); }
+  th .sort-arrow { font-size: 0.65rem; margin-left: 3px; }
+  td.notes-cell, td.method-cell { max-width: 240px; color: var(--text-secondary); }
+  td.time-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .type-badge { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .type-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .row-actions { display: flex; gap: 6px; white-space: nowrap; }
+  .row-actions button { background: transparent; border: none; cursor: pointer; color: var(--text-muted); font-size: 0.78rem; padding: 2px 4px; }
+  .row-actions button:hover { color: var(--series-1); }
+  .row-actions .del:hover { color: var(--status-critical); }
+  .empty-row td { text-align: center; color: var(--text-muted); padding: 30px 0; }
+
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: var(--overlay);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface-2);
+    border-radius: 14px;
+    padding: 22px 22px 18px;
+    width: 100%;
+    max-width: 480px;
+    border: 1px solid var(--border);
+  }
+  .modal h2 { margin: 0 0 14px; font-size: 1.05rem; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
+  .field input, .field select, .field textarea {
+    width: 100%;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.88rem;
+  }
+  .field textarea { resize: vertical; min-height: 52px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
+  .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
+  .modal-actions .right { display: flex; gap: 8px; }
+
+  footer.app-footer {
+    max-width: 1160px; margin: 24px auto 0; padding: 0 20px;
+    font-size: 0.76rem; color: var(--text-muted);
+  }
+
+  @media (max-width: 760px) {
+    .charts-grid { grid-template-columns: 1fr; }
+    .field-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+
+  <header class="top">
+    <div>
+      <h1>🌙 Sleep &amp; Settling Tracker<br>
+        <span style="font-size:0.6em;font-weight:400;">for <input id="babyName" class="name-edit" value="Baby" aria-label="Baby's name"></span>
+      </h1>
+      <p class="subtitle">Every nap, bedtime and night wake-up — how it went, who was on duty, what helped.</p>
+    </div>
+    <div class="top-actions">
+      <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
+      <button class="btn" id="exportBtn">Export CSV</button>
+      <button class="btn btn-primary" id="addBtn">+ Log a session</button>
+    </div>
+  </header>
+
+  <div class="banner" id="storageBanner">
+    <span>💾 Data lives in this browser only (no server) — use <strong>Export CSV</strong> regularly to back it up or move it to another device.</span>
+    <button class="btn btn-ghost" id="dismissBanner" aria-label="Dismiss">✕</button>
+  </div>
+
+  <section class="filter-row" aria-label="Filters">
+    <select id="filterRange" aria-label="Date range">
+      <option value="all">All time</option>
+      <option value="7">Last 7 days</option>
+      <option value="14">Last 14 days</option>
+      <option value="30">Last 30 days</option>
+    </select>
+    <select id="filterType" aria-label="Event type"></select>
+    <select id="filterCarer" aria-label="Carer"></select>
+    <input type="search" id="filterSearch" class="search-input" placeholder="Search method or notes…" aria-label="Search method or notes">
+    <span class="spacer"></span>
+    <span class="filter-count" id="filterCount"></span>
+  </section>
+
+  <section class="kpi-row" id="kpiRow"></section>
+
+  <section class="charts-grid">
+    <figure class="chart-card wide" id="chartSessions">
+      <h2>Settle time per session</h2>
+      <p class="chart-caption">Minutes spent settling, in order — colored by event type.</p>
+      <div class="chart-scroll"></div>
+      <div class="legend"></div>
+    </figure>
+
+    <figure class="chart-card" id="chartAvgByType">
+      <h2>Average settle time by type</h2>
+      <p class="chart-caption">Mean minutes to settle, per event type.</p>
+      <div class="chart-scroll"></div>
+      <div class="legend"></div>
+    </figure>
+
+    <figure class="chart-card" id="chartCarerBreakdown">
+      <h2>Who settles which events</h2>
+      <p class="chart-caption">Sessions handled by each carer, split by type.</p>
+      <div class="chart-scroll"></div>
+      <div class="legend"></div>
+    </figure>
+
+    <figure class="chart-card" id="chartWakeups">
+      <h2>Night wake-ups by day</h2>
+      <p class="chart-caption">Count of night wake-up events logged per day.</p>
+      <div class="chart-scroll"></div>
+    </figure>
+
+    <figure class="chart-card" id="chartTechniques">
+      <h2>Common settling techniques</h2>
+      <p class="chart-caption">Keywords found in "how he settled" — a session can use more than one.</p>
+      <div class="chart-scroll"></div>
+    </figure>
+  </section>
+
+  <section class="table-card">
+    <div class="table-header">
+      <h2>Session log</h2>
+      <span class="spacer"></span>
+      <span class="filter-count" id="tableCount"></span>
+    </div>
+    <div class="table-scroll">
+      <table id="sessionsTable">
+        <thead>
+          <tr>
+            <th data-key="date">Date</th>
+            <th data-key="time">Time</th>
+            <th data-key="eventType">Type</th>
+            <th data-key="carer">Carer</th>
+            <th data-key="duration">Settle time</th>
+            <th data-key="method">How he settled</th>
+            <th data-key="notes">Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="app-footer">
+    Built from your sleep log spreadsheet · data stays local to this browser.
+  </footer>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <form class="modal" id="sessionForm">
+    <h2 id="modalTitle">Log a session</h2>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="f-date">Date</label>
+        <input type="date" id="f-date" required>
+      </div>
+      <div class="field">
+        <label for="f-type">Event type</label>
+        <select id="f-type">
+          <option value="Nap">Nap</option>
+          <option value="Bedtime">Bedtime</option>
+          <option value="Night wake-up">Night wake-up</option>
+          <option value="__other">Other…</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="f-type-other-wrap" style="display:none;">
+      <label for="f-type-other">Custom event type</label>
+      <input type="text" id="f-type-other" placeholder="e.g. Nap 2">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="f-start">Settling started</label>
+        <input type="time" id="f-start" required>
+      </div>
+      <div class="field">
+        <label for="f-end">Settled / asleep by</label>
+        <input type="time" id="f-end">
+      </div>
+    </div>
+    <p class="field-hint" id="durationHint"></p>
+
+    <div class="field">
+      <label for="f-carer">Carer</label>
+      <input type="text" id="f-carer" list="carerOptions" placeholder="Rosie, Dave, Pia, or “-” for self-settled">
+      <datalist id="carerOptions"></datalist>
+    </div>
+
+    <div class="field">
+      <label for="f-method">How he settled</label>
+      <textarea id="f-method" placeholder="e.g. Rocked to drowsy, patted in cot"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="f-notes">Notes (suspected reasons, circumstances)</label>
+      <textarea id="f-notes" placeholder="e.g. teething, vaccination, routine change…"></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-danger btn-ghost" id="deleteBtn" style="display:none;">Delete</button>
+      <div class="right">
+        <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "sleepTracker.sessions.v1";
+  var NAME_KEY = "sleepTracker.babyName";
+  var THEME_KEY = "sleepTracker.theme";
+  var BANNER_KEY = "sleepTracker.bannerDismissed";
+
+  var SVG_NS = "http://www.w3.org/2000/svg";
+
+  /* ---------- seed data (from the spreadsheet) ---------- */
+  var RAW_SEED = [
+    ["2026-07-06","12:10","12:15","Nap","Rosie","Quick cuddle, put down awake, pat to sleep circa 5 mins","Wanted to be put down"],
+    ["2026-07-06","19:30","20:00","Bedtime","Dave","Rock to sleep; transfer deeply asleep","Tried rocking to transfer drowsy but didn't work; first 1 nap day, should have been tired"],
+    ["2026-07-06","23:30","01:30","Night wake-up","Dave","Floorbed co-sleeping","Wake up reason unknown; attempted 10min CIO then would fall asleep quickly on Dave but not transfer; first day of successful 1 day nap day"],
+    ["2026-07-07","12:10","12:15","Nap","Rosie","Quick cuddle, put down drowsy, pat to sleep","Was being wriggly and pointing at door, gently rocked him till rubbing eyes (circa 2/3 mins) put down drowsy and then firm pats and shush for a couple mins till asleep"],
+    ["2026-07-07","19:30","19:35","Bedtime","Dave","Rocked to sleep but it only took two minutes of hypnotist voice. Cuddled on chair then transferred asleep",""],
+    ["2026-07-08","12:10","","Nap","-","Fell asleep in car","Transferred to cot but woke up after 1.5h"],
+    ["2026-07-08","20:00","20:10","Bedtime","Pia","(Post vomit) Bottle and short cuddle on armchair; transfer asleep","Initially accepted being put down into his cot immediately after stories and attempted to wind himself down with me next to him, but a bit of coughing triggered a vomit"],
+    ["2026-07-09","06:25","06:50","Night wake-up","-","Played and self settled",""],
+    ["2026-07-09","12:45","12:55","Nap","Rosie","Cuddled till drowsy(ish) and then patted till sleep.","Initial try unsuccessful, but worked after 1 min more cuddles. He wanted to be put in the cot. Was acting not tired the whole time I was holding him"],
+    ["2026-07-09","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
+    ["2026-07-10","12:25","12:40","Nap","Rosie","Rocked to very drowsy, took a bit longer to settle due to light. Patted until fully asleep for about 3/4 mins",""],
+    ["2026-07-10","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
+    ["2026-07-11","01:00","01:05","Nap","Rosie","Rocked until slightly drowsy, patted in cot couple minutes",""],
+    ["2026-07-11","08:05","08:45","Bedtime","Rosie","Up and down in cot, very resistant. Eventually put down almost asleep and then patted",""],
+    ["2026-07-12","12:30","12:55","Nap","Rosie","Initially very upset, had to come downstairs and reset. Once back in room, rocked until just asleep then patted. Had to really encourage the sleep",""],
+    ["2026-07-12","19:25","19:40","Bedtime","Dave","Rock to sleep; transfer deeply asleep",""],
+    ["2026-07-13","12:25","12:30","Nap","Rosie","Walked around with him until literally just asleep, transferred immediately and patted while he waa waaed until asleep",""],
+    ["2026-07-13","19:25","19:45","Bedtime","Dave","Rock to sleep; transfer deeply asleep. Quite tricky - he was very vocal the whole time.",""],
+    ["2026-07-13","21:10","21:30","Night wake-up","Pia","Milk, snuggle, a couple of transfer attempts;","Initially refused milk but then had it; seemed unsettled; perhaps a belly ache as he had a troubled gut during the day?"]
+  ];
+
+  function seedSessions() {
+    return RAW_SEED.map(function (r, i) {
+      return {
+        id: "seed-" + i,
+        date: r[0], startTime: r[1], endTime: r[2] || null,
+        eventType: r[3], carer: r[4], method: r[5], notes: r[6]
+      };
+    });
+  }
+
+  /* ---------- state ---------- */
+  var sessions = loadSessions();
+  var sort = { key: "date", dir: "desc" };
+  var editingId = null;
+
+  function loadSessions() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    var seed = seedSessions();
+    persist(seed);
+    return seed;
+  }
+  function persist(list) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  /* ---------- time helpers ---------- */
+  function toMinutes(hhmm) {
+    var parts = hhmm.split(":");
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  }
+  function durationOf(s) {
+    if (!s.startTime || !s.endTime) return null;
+    var start = toMinutes(s.startTime);
+    var end = toMinutes(s.endTime);
+    if (end < start) end += 24 * 60;
+    return end - start;
+  }
+  function fmtDuration(mins) {
+    if (mins == null) return "–";
+    if (mins < 60) return mins + "m";
+    var h = Math.floor(mins / 60), m = mins % 60;
+    return h + "h" + (m ? " " + m + "m" : "");
+  }
+  function fmtTime12(hhmm) {
+    if (!hhmm) return "";
+    var parts = hhmm.split(":");
+    var h = parseInt(parts[0], 10), m = parts[1];
+    var ap = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12; if (h12 === 0) h12 = 12;
+    return h12 + ":" + m + " " + ap;
+  }
+  function timeRangeLabel(s) {
+    if (!s.endTime) return fmtTime12(s.startTime);
+    return fmtTime12(s.startTime) + " – " + fmtTime12(s.endTime);
+  }
+  function fmtDateLabel(iso) {
+    var d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  }
+  function fmtDateFull(iso) {
+    var d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  }
+  function daysAgo(iso) {
+    var d = new Date(iso + "T00:00:00");
+    var now = new Date(); now.setHours(0,0,0,0);
+    return Math.round((now - d) / 86400000);
+  }
+
+  /* ---------- category colors (fixed order = entity identity) ---------- */
+  var TYPE_ORDER = [];
+  var TYPE_COLOR_VARS = ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5"];
+  function ensureTypeKnown(type) {
+    if (TYPE_ORDER.indexOf(type) === -1) TYPE_ORDER.push(type);
+  }
+  function typeColorVar(type) {
+    ensureTypeKnown(type);
+    var idx = TYPE_ORDER.indexOf(type);
+    return TYPE_COLOR_VARS[idx % TYPE_COLOR_VARS.length];
+  }
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  // seed the canonical order first so colors stay stable across reloads
+  ["Nap", "Bedtime", "Night wake-up"].forEach(ensureTypeKnown);
+
+  /* ---------- filters ---------- */
+  var els = {
+    filterRange: document.getElementById("filterRange"),
+    filterType: document.getElementById("filterType"),
+    filterCarer: document.getElementById("filterCarer"),
+    filterSearch: document.getElementById("filterSearch"),
+    filterCount: document.getElementById("filterCount"),
+    tableCount: document.getElementById("tableCount"),
+    kpiRow: document.getElementById("kpiRow"),
+    tableBody: document.getElementById("tableBody"),
+    tooltip: document.getElementById("tooltip"),
+    modalOverlay: document.getElementById("modalOverlay"),
+    sessionForm: document.getElementById("sessionForm"),
+    modalTitle: document.getElementById("modalTitle"),
+    deleteBtn: document.getElementById("deleteBtn"),
+    carerOptions: document.getElementById("carerOptions")
+  };
+
+  function populateFilterOptions() {
+    var types = uniqueSorted(sessions.map(function (s) { return s.eventType; }));
+    var carers = uniqueSorted(sessions.map(function (s) { return s.carer; }).filter(function (c) { return c && c !== "-"; }));
+
+    fillSelect(els.filterType, ["all"].concat(types), function (v) { return v === "all" ? "All types" : v; });
+    fillSelect(els.filterCarer, ["all"].concat(carers), function (v) { return v === "all" ? "All carers" : v; });
+
+    els.carerOptions.innerHTML = "";
+    carers.forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = c;
+      els.carerOptions.appendChild(opt);
+    });
+  }
+  function fillSelect(select, values, labelFn) {
+    var current = select.value;
+    select.innerHTML = "";
+    values.forEach(function (v) {
+      var opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = labelFn(v);
+      select.appendChild(opt);
+    });
+    if (values.indexOf(current) !== -1) select.value = current;
+  }
+  function uniqueSorted(arr) {
+    var seen = {}, out = [];
+    arr.forEach(function (v) { if (v && !seen[v]) { seen[v] = true; out.push(v); } });
+    return out.sort();
+  }
+
+  function filteredSessions() {
+    var range = els.filterRange.value;
+    var type = els.filterType.value;
+    var carer = els.filterCarer.value;
+    var q = els.filterSearch.value.trim().toLowerCase();
+
+    return sessions.filter(function (s) {
+      if (range !== "all" && daysAgo(s.date) >= parseInt(range, 10)) return false;
+      if (type !== "all" && s.eventType !== type) return false;
+      if (carer !== "all" && s.carer !== carer) return false;
+      if (q) {
+        var hay = ((s.method || "") + " " + (s.notes || "")).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  [els.filterRange, els.filterType, els.filterCarer].forEach(function (el) {
+    el.addEventListener("change", renderAll);
+  });
+  els.filterSearch.addEventListener("input", debounce(renderAll, 150));
+
+  function debounce(fn, ms) {
+    var t;
+    return function () { clearTimeout(t); t = setTimeout(fn, ms); };
+  }
+
+  /* ---------- KPIs ---------- */
+  function renderKPIs(data) {
+    var withDuration = data.filter(function (s) { return durationOf(s) != null; });
+    var avg = withDuration.length ? Math.round(withDuration.reduce(function (a, s) { return a + durationOf(s); }, 0) / withDuration.length) : null;
+
+    var wakeups7 = data.filter(function (s) { return s.eventType === "Night wake-up" && daysAgo(s.date) < 7; }).length;
+
+    var carerCounts = {};
+    data.forEach(function (s) {
+      if (!s.carer || s.carer === "-") return;
+      carerCounts[s.carer] = (carerCounts[s.carer] || 0) + 1;
+    });
+    var topCarer = Object.keys(carerCounts).sort(function (a, b) { return carerCounts[b] - carerCounts[a]; })[0];
+
+    var tiles = [
+      { label: "Sessions logged", value: String(data.length), sub: data.length ? fmtDateLabel(minDate(data)) + " – " + fmtDateLabel(maxDate(data)) : "No data in range" },
+      { label: "Avg. settle time", value: avg != null ? fmtDuration(avg) : "–", sub: withDuration.length + " session" + (withDuration.length === 1 ? "" : "s") + " with a recorded end time" },
+      { label: "Night wake-ups (7d)", value: String(wakeups7), sub: "in the last 7 days" },
+      { label: "Most active carer", value: topCarer || "–", sub: topCarer ? carerCounts[topCarer] + " session" + (carerCounts[topCarer] === 1 ? "" : "s") : "No carer data" }
+    ];
+
+    els.kpiRow.innerHTML = "";
+    tiles.forEach(function (t) {
+      var div = document.createElement("div");
+      div.className = "kpi-tile";
+      var label = document.createElement("div"); label.className = "label"; label.textContent = t.label;
+      var value = document.createElement("div"); value.className = "value"; value.textContent = t.value;
+      var sub = document.createElement("div"); sub.className = "sub"; sub.textContent = t.sub;
+      div.appendChild(label); div.appendChild(value); div.appendChild(sub);
+      els.kpiRow.appendChild(div);
+    });
+  }
+  function minDate(data) { return data.map(function (s) { return s.date; }).sort()[0]; }
+  function maxDate(data) { return data.map(function (s) { return s.date; }).sort().slice(-1)[0]; }
+
+  /* ---------- SVG chart helpers ---------- */
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+  function roundedTopPath(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h);
+    if (h <= 0) return "";
+    if (r <= 0) return "M" + x + "," + (y + h) + " L" + x + "," + y + " L" + (x + w) + "," + y + " L" + (x + w) + "," + (y + h) + " Z";
+    return "M" + x + "," + (y + h) +
+      " L" + x + "," + (y + r) +
+      " Q" + x + "," + y + " " + (x + r) + "," + y +
+      " L" + (x + w - r) + "," + y +
+      " Q" + (x + w) + "," + y + " " + (x + w) + "," + (y + r) +
+      " L" + (x + w) + "," + (y + h) + " Z";
+  }
+  function roundedRightPath(x, y, w, h, r) {
+    r = Math.min(r, h / 2, w);
+    if (w <= 0) return "";
+    if (r <= 0) return "M" + x + "," + y + " L" + (x + w) + "," + y + " L" + (x + w) + "," + (y + h) + " L" + x + "," + (y + h) + " Z";
+    return "M" + x + "," + y +
+      " L" + (x + w - r) + "," + y +
+      " Q" + (x + w) + "," + y + " " + (x + w) + "," + (y + r) +
+      " L" + (x + w) + "," + (y + h - r) +
+      " Q" + (x + w) + "," + (y + h) + " " + (x + w - r) + "," + (y + h) +
+      " L" + x + "," + (y + h) + " Z";
+  }
+  function niceStep(maxVal, targetTicks) {
+    if (maxVal <= 0) return 1;
+    var rough = maxVal / targetTicks;
+    var mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    var norm = rough / mag;
+    var step;
+    if (norm < 1.5) step = 1;
+    else if (norm < 3) step = 2;
+    else if (norm < 7) step = 5;
+    else step = 10;
+    return step * mag;
+  }
+
+  function showTooltip(evt, html) {
+    els.tooltip.innerHTML = html;
+    els.tooltip.classList.add("visible");
+    positionTooltip(evt);
+  }
+  function positionTooltip(evt) {
+    var x = evt.clientX, y = evt.clientY;
+    var pad = 14;
+    var rect = els.tooltip.getBoundingClientRect();
+    var left = x + pad, top = y + pad;
+    if (left + rect.width > window.innerWidth - 8) left = x - rect.width - pad;
+    if (top + rect.height > window.innerHeight - 8) top = y - rect.height - pad;
+    els.tooltip.style.left = left + "px";
+    els.tooltip.style.top = top + "px";
+  }
+  function hideTooltip() {
+    els.tooltip.classList.remove("visible");
+  }
+  function attachMarkEvents(mark, tooltipHtml, ariaLabel) {
+    mark.setAttribute("tabindex", "0");
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", ariaLabel);
+    mark.classList.add("bar-mark");
+    mark.addEventListener("pointermove", function (e) { mark.classList.add("hovered"); showTooltip(e, tooltipHtml); });
+    mark.addEventListener("pointerleave", function () { mark.classList.remove("hovered"); hideTooltip(); });
+    mark.addEventListener("focus", function (e) {
+      mark.classList.add("hovered");
+      var box = mark.getBoundingClientRect();
+      showTooltip({ clientX: box.left + box.width / 2, clientY: box.top }, tooltipHtml);
+    });
+    mark.addEventListener("blur", function () { mark.classList.remove("hovered"); hideTooltip(); });
+  }
+  function legendKey(colorVar) {
+    var span = document.createElement("span");
+    span.className = "legend-key";
+    span.style.background = "var(" + colorVar + ")";
+    return span;
+  }
+  function buildLegend(container, items) {
+    container.innerHTML = "";
+    if (items.length < 2) { container.style.display = "none"; return; }
+    container.style.display = "flex";
+    items.forEach(function (it) {
+      var row = document.createElement("span");
+      row.className = "legend-item";
+      row.appendChild(legendKey(it.colorVar));
+      var txt = document.createElement("span");
+      txt.textContent = it.label;
+      row.appendChild(txt);
+      container.appendChild(row);
+    });
+  }
+
+  /* ---------- Chart A: settle time per session ---------- */
+  function renderSessionsChart(data) {
+    var card = document.getElementById("chartSessions");
+    var scroll = card.querySelector(".chart-scroll");
+    var legend = card.querySelector(".legend");
+    scroll.innerHTML = "";
+
+    var withDur = data.filter(function (s) { return durationOf(s) != null; })
+      .slice().sort(function (a, b) { return (a.date + a.startTime).localeCompare(b.date + b.startTime); });
+
+    if (!withDur.length) { scroll.innerHTML = '<p class="empty-chart">No sessions with a recorded end time in this range.</p>'; legend.style.display = "none"; return; }
+
+    var barSlot = 30, barW = 18;
+    var padL = 40, padR = 16, padT = 10, padB = 34;
+    var plotH = 170;
+    var plotW = Math.max(withDur.length * barSlot, 260);
+    var w = plotW + padL + padR, h = plotH + padT + padB;
+
+    var maxVal = Math.max.apply(null, withDur.map(function (s) { return durationOf(s); }));
+    var step = niceStep(maxVal, 4);
+    var niceMax = Math.ceil(maxVal / step) * step;
+
+    var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Settle time per session" });
+
+    for (var t = 0; t <= niceMax; t += step) {
+      var y = padT + plotH - (t / niceMax) * plotH;
+      svg.appendChild(svgEl("line", { class: "grid-line", x1: padL, x2: padL + plotW, y1: y, y2: y }));
+      var lbl = svgEl("text", { x: padL - 8, y: y + 3, "text-anchor": "end", class: "axis-label" });
+      lbl.textContent = t + "m";
+      svg.appendChild(lbl);
+    }
+    svg.appendChild(svgEl("line", { class: "baseline-line", x1: padL, x2: padL + plotW, y1: padT + plotH, y2: padT + plotH }));
+
+    var lastDateLabel = null;
+    withDur.forEach(function (s, i) {
+      var dur = durationOf(s);
+      var barH = (dur / niceMax) * plotH;
+      var x = padL + i * barSlot + (barSlot - barW) / 2;
+      var y = padT + plotH - barH;
+      var colorVar = typeColorVar(s.eventType);
+      var path = svgEl("path", { d: roundedTopPath(x, y, barW, barH, 4), fill: "var(" + colorVar + ")" });
+      var tip = '<div class="t-title">' + esc(fmtDateFull(s.date)) + '</div>' +
+        '<div class="t-row"><span class="t-key" style="background:var(' + colorVar + ')"></span>' + esc(s.eventType) + '</div>' +
+        '<div class="t-row">' + esc(timeRangeLabel(s)) + '</div>' +
+        '<div class="t-row">Carer: ' + esc(s.carer || "–") + '</div>' +
+        '<div class="t-row">Settle time: <span class="t-value">' + esc(fmtDuration(dur)) + '</span></div>';
+      attachMarkEvents(path, tip, s.eventType + " on " + fmtDateFull(s.date) + ", settled in " + fmtDuration(dur));
+      svg.appendChild(path);
+
+      var dateLabel = fmtDateLabel(s.date);
+      if (dateLabel !== lastDateLabel) {
+        var dl = svgEl("text", { x: x + barW / 2, y: padT + plotH + 16, "text-anchor": "middle", class: "axis-label" });
+        dl.textContent = dateLabel;
+        svg.appendChild(dl);
+        lastDateLabel = dateLabel;
+      }
+    });
+
+    scroll.appendChild(svg);
+    var legendItems = TYPE_ORDER.filter(function (t) { return withDur.some(function (s) { return s.eventType === t; }); })
+      .map(function (t) { return { colorVar: typeColorVar(t), label: t }; });
+    buildLegend(legend, legendItems);
+  }
+
+  /* ---------- Chart B: average settle time by type (horizontal) ---------- */
+  function renderAvgByType(data) {
+    var card = document.getElementById("chartAvgByType");
+    var scroll = card.querySelector(".chart-scroll");
+    var legend = card.querySelector(".legend");
+    legend.style.display = "none";
+    scroll.innerHTML = "";
+
+    var byType = {};
+    data.forEach(function (s) {
+      var d = durationOf(s);
+      if (d == null) return;
+      byType[s.eventType] = byType[s.eventType] || [];
+      byType[s.eventType].push(d);
+    });
+    var types = TYPE_ORDER.filter(function (t) { return byType[t] && byType[t].length; });
+    if (!types.length) { scroll.innerHTML = '<p class="empty-chart">No sessions with a recorded end time in this range.</p>'; return; }
+
+    var rows = types.map(function (t) {
+      var arr = byType[t];
+      var avg = Math.round(arr.reduce(function (a, b) { return a + b; }, 0) / arr.length);
+      return { type: t, avg: avg, n: arr.length };
+    });
+
+    var padL = 100, padR = 46, padT = 6, padB = 6;
+    var rowH = 34, barH = 18;
+    var plotW = 220;
+    var w = padL + plotW + padR, h = rows.length * rowH + padT + padB;
+    var maxVal = Math.max.apply(null, rows.map(function (r) { return r.avg; }));
+    var niceMax = Math.ceil(maxVal / niceStep(maxVal, 3)) * niceStep(maxVal, 3);
+
+    var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Average settle time by type" });
+
+    rows.forEach(function (r, i) {
+      var y = padT + i * rowH + (rowH - barH) / 2;
+      var barW = niceMax > 0 ? (r.avg / niceMax) * plotW : 0;
+      var colorVar = typeColorVar(r.type);
+
+      var label = svgEl("text", { x: padL - 10, y: y + barH / 2 + 3, "text-anchor": "end", class: "axis-label" });
+      label.textContent = r.type;
+      svg.appendChild(label);
+
+      var path = svgEl("path", { d: roundedRightPath(padL, y, Math.max(barW, 2), barH, 4), fill: "var(" + colorVar + ")" });
+      var tip = '<div class="t-title">' + esc(r.type) + '</div>' +
+        '<div class="t-row">Average: <span class="t-value">' + esc(fmtDuration(r.avg)) + '</span></div>' +
+        '<div class="t-row">Across ' + r.n + ' session' + (r.n === 1 ? "" : "s") + '</div>';
+      attachMarkEvents(path, tip, r.type + " average settle time " + fmtDuration(r.avg));
+      svg.appendChild(path);
+
+      var valueLabel = svgEl("text", { x: padL + barW + 8, y: y + barH / 2 + 3, class: "value-label" });
+      valueLabel.textContent = fmtDuration(r.avg);
+      svg.appendChild(valueLabel);
+    });
+
+    scroll.appendChild(svg);
+  }
+
+  /* ---------- Chart C: carer breakdown (stacked horizontal) ---------- */
+  function renderCarerBreakdown(data) {
+    var card = document.getElementById("chartCarerBreakdown");
+    var scroll = card.querySelector(".chart-scroll");
+    var legend = card.querySelector(".legend");
+    scroll.innerHTML = "";
+
+    var carers = uniqueSorted(data.map(function (s) { return s.carer; }).filter(function (c) { return c && c !== "-"; }));
+    if (!carers.length) { scroll.innerHTML = '<p class="empty-chart">No carer data in this range.</p>'; legend.style.display = "none"; return; }
+
+    var matrix = {};
+    carers.forEach(function (c) { matrix[c] = {}; });
+    data.forEach(function (s) {
+      if (!s.carer || s.carer === "-") return;
+      matrix[s.carer][s.eventType] = (matrix[s.carer][s.eventType] || 0) + 1;
+    });
+    var totals = carers.map(function (c) {
+      return Object.keys(matrix[c]).reduce(function (a, k) { return a + matrix[c][k]; }, 0);
+    });
+    var maxTotal = Math.max.apply(null, totals);
+
+    var padL = 60, padR = 40, padT = 6, padB = 6;
+    var rowH = 34, barH = 18;
+    var plotW = 220;
+    var w = padL + plotW + padR, h = carers.length * rowH + padT + padB;
+
+    var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Sessions by carer and event type" });
+
+    carers.forEach(function (c, i) {
+      var y = padT + i * rowH + (rowH - barH) / 2;
+      var label = svgEl("text", { x: padL - 10, y: y + barH / 2 + 3, "text-anchor": "end", class: "axis-label" });
+      label.textContent = c;
+      svg.appendChild(label);
+
+      var xCursor = padL;
+      TYPE_ORDER.filter(function (t) { return matrix[c][t]; }).forEach(function (t) {
+        var count = matrix[c][t];
+        var segW = maxTotal > 0 ? (count / maxTotal) * plotW : 0;
+        var colorVar = typeColorVar(t);
+        var isLast = (xCursor + segW) >= padL + (totals[i] / maxTotal) * plotW - 0.5;
+        var path = svgEl("path", { d: roundedRightPath(xCursor, y, Math.max(segW - 2, 1), barH, isLast ? 4 : 0), fill: "var(" + colorVar + ")" });
+        var tip = '<div class="t-title">' + esc(c) + '</div>' +
+          '<div class="t-row"><span class="t-key" style="background:var(' + colorVar + ')"></span>' + esc(t) + ': <span class="t-value">' + count + '</span></div>';
+        attachMarkEvents(path, tip, c + ", " + t + ": " + count + " sessions");
+        svg.appendChild(path);
+        xCursor += segW;
+      });
+
+      var totalLabel = svgEl("text", { x: xCursor + 8, y: y + barH / 2 + 3, class: "value-label" });
+      totalLabel.textContent = String(totals[i]);
+      svg.appendChild(totalLabel);
+    });
+
+    scroll.appendChild(svg);
+    var legendItems = TYPE_ORDER.filter(function (t) { return data.some(function (s) { return s.eventType === t && s.carer && s.carer !== "-"; }); })
+      .map(function (t) { return { colorVar: typeColorVar(t), label: t }; });
+    buildLegend(legend, legendItems);
+  }
+
+  /* ---------- Chart D: night wake-ups by day ---------- */
+  function renderWakeupsByDay(data) {
+    var card = document.getElementById("chartWakeups");
+    var scroll = card.querySelector(".chart-scroll");
+    scroll.innerHTML = "";
+
+    var wakeups = data.filter(function (s) { return s.eventType === "Night wake-up"; });
+    if (!wakeups.length) { scroll.innerHTML = '<p class="empty-chart">No night wake-ups in this range.</p>'; return; }
+
+    var counts = {};
+    wakeups.forEach(function (s) { counts[s.date] = (counts[s.date] || 0) + 1; });
+    var dates = Object.keys(counts).sort();
+
+    var barSlot = 34, barW = 18;
+    var padL = 30, padR = 16, padT = 10, padB = 30;
+    var plotH = 130;
+    var plotW = Math.max(dates.length * barSlot, 200);
+    var w = plotW + padL + padR, h = plotH + padT + padB;
+    var maxVal = Math.max.apply(null, dates.map(function (d) { return counts[d]; }));
+    var niceMax = Math.max(maxVal, 2);
+
+    var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Night wake-ups per day" });
+
+    for (var t = 0; t <= niceMax; t++) {
+      var y = padT + plotH - (t / niceMax) * plotH;
+      svg.appendChild(svgEl("line", { class: "grid-line", x1: padL, x2: padL + plotW, y1: y, y2: y }));
+      var lbl = svgEl("text", { x: padL - 8, y: y + 3, "text-anchor": "end", class: "axis-label" });
+      lbl.textContent = t;
+      svg.appendChild(lbl);
+    }
+    svg.appendChild(svgEl("line", { class: "baseline-line", x1: padL, x2: padL + plotW, y1: padT + plotH, y2: padT + plotH }));
+
+    dates.forEach(function (d, i) {
+      var count = counts[d];
+      var barH = (count / niceMax) * plotH;
+      var x = padL + i * barSlot + (barSlot - barW) / 2;
+      var y = padT + plotH - barH;
+      var path = svgEl("path", { d: roundedTopPath(x, y, barW, barH, 4), fill: "var(--sequential)" });
+      var tip = '<div class="t-title">' + esc(fmtDateFull(d)) + '</div><div class="t-row">Wake-ups: <span class="t-value">' + count + '</span></div>';
+      attachMarkEvents(path, tip, fmtDateFull(d) + ": " + count + " night wake-ups");
+      svg.appendChild(path);
+
+      var dl = svgEl("text", { x: x + barW / 2, y: padT + plotH + 16, "text-anchor": "middle", class: "axis-label" });
+      dl.textContent = fmtDateLabel(d);
+      svg.appendChild(dl);
+    });
+
+    scroll.appendChild(svg);
+  }
+
+  /* ---------- Chart E: settling techniques (keyword frequency) ---------- */
+  var TECHNIQUE_KEYWORDS = [
+    { label: "Rocking", re: /rock/i },
+    { label: "Cuddling", re: /cuddl|snuggl/i },
+    { label: "Patting", re: /pat/i },
+    { label: "Co-sleep / floorbed", re: /floorbed|co-?sleep/i },
+    { label: "Milk / bottle", re: /milk|bottle/i },
+    { label: "Self-settled", re: /self.?settl|played/i },
+    { label: "Walking", re: /walk/i },
+    { label: "Fell asleep in car", re: /\bcar\b/i },
+    { label: "Controlled crying (CIO)", re: /\bcio\b|controlled cry/i }
+  ];
+  function renderTechniques(data) {
+    var card = document.getElementById("chartTechniques");
+    var scroll = card.querySelector(".chart-scroll");
+    scroll.innerHTML = "";
+
+    var counts = TECHNIQUE_KEYWORDS.map(function (k) {
+      var n = data.filter(function (s) { return k.re.test(s.method || ""); }).length;
+      return { label: k.label, n: n };
+    }).filter(function (r) { return r.n > 0; }).sort(function (a, b) { return b.n - a.n; });
+
+    if (!counts.length) { scroll.innerHTML = '<p class="empty-chart">No recognizable settling techniques in this range.</p>'; return; }
+
+    var padL = 150, padR = 40, padT = 6, padB = 6;
+    var rowH = 28, barH = 14;
+    var plotW = 180;
+    var w = padL + plotW + padR, h = counts.length * rowH + padT + padB;
+    var maxVal = counts[0].n;
+
+    var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Common settling techniques" });
+
+    counts.forEach(function (r, i) {
+      var y = padT + i * rowH + (rowH - barH) / 2;
+      var barW = (r.n / maxVal) * plotW;
+      var label = svgEl("text", { x: padL - 10, y: y + barH / 2 + 3, "text-anchor": "end", class: "axis-label" });
+      label.textContent = r.label;
+      svg.appendChild(label);
+
+      var path = svgEl("path", { d: roundedRightPath(padL, y, Math.max(barW, 2), barH, 3), fill: "var(--sequential)" });
+      var tip = '<div class="t-title">' + esc(r.label) + '</div><div class="t-row">Mentioned in <span class="t-value">' + r.n + '</span> session' + (r.n === 1 ? "" : "s") + '</div>';
+      attachMarkEvents(path, tip, r.label + ": " + r.n + " sessions");
+      svg.appendChild(path);
+
+      var valueLabel = svgEl("text", { x: padL + barW + 8, y: y + barH / 2 + 3, class: "value-label" });
+      valueLabel.textContent = String(r.n);
+      svg.appendChild(valueLabel);
+    });
+
+    scroll.appendChild(svg);
+  }
+
+  /* ---------- table ---------- */
+  function renderTable(data) {
+    var sorted = data.slice().sort(function (a, b) {
+      var av, bv;
+      if (sort.key === "date") { av = a.date + a.startTime; bv = b.date + b.startTime; }
+      else if (sort.key === "time") { av = a.startTime; bv = b.startTime; }
+      else if (sort.key === "duration") { av = durationOf(a) == null ? -1 : durationOf(a); bv = durationOf(b) == null ? -1 : durationOf(b); }
+      else { av = (a[sort.key] || "").toLowerCase(); bv = (b[sort.key] || "").toLowerCase(); }
+      if (av < bv) return sort.dir === "asc" ? -1 : 1;
+      if (av > bv) return sort.dir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    els.tableBody.innerHTML = "";
+    if (!sorted.length) {
+      var tr = document.createElement("tr");
+      tr.className = "empty-row";
+      var emptyCell = document.createElement("td");
+      emptyCell.colSpan = 8;
+      emptyCell.textContent = "No sessions match the current filters.";
+      tr.appendChild(emptyCell);
+      els.tableBody.appendChild(tr);
+      return;
+    }
+
+    sorted.forEach(function (s) {
+      var tr = document.createElement("tr");
+
+      tr.appendChild(td(fmtDateLabel(s.date)));
+      var tCell = td(timeRangeLabel(s)); tCell.className = "time-cell"; tr.appendChild(tCell);
+
+      var typeCell = document.createElement("td");
+      var badge = document.createElement("span"); badge.className = "type-badge";
+      var dot = document.createElement("span"); dot.className = "type-dot"; dot.style.background = "var(" + typeColorVar(s.eventType) + ")";
+      badge.appendChild(dot);
+      var typeText = document.createElement("span"); typeText.textContent = s.eventType;
+      badge.appendChild(typeText);
+      typeCell.appendChild(badge);
+      tr.appendChild(typeCell);
+
+      tr.appendChild(td(s.carer || "–"));
+      var durCell = td(fmtDuration(durationOf(s))); durCell.className = "time-cell"; tr.appendChild(durCell);
+
+      var methodCell = td(s.method || ""); methodCell.className = "method-cell"; tr.appendChild(methodCell);
+      var notesCell = td(s.notes || ""); notesCell.className = "notes-cell"; tr.appendChild(notesCell);
+
+      var actionsCell = document.createElement("td");
+      var actions = document.createElement("div"); actions.className = "row-actions";
+      var editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", function () { openModal(s.id); });
+      var delBtn = document.createElement("button"); delBtn.type = "button"; delBtn.textContent = "Delete"; delBtn.className = "del";
+      delBtn.addEventListener("click", function () { deleteSession(s.id); });
+      actions.appendChild(editBtn); actions.appendChild(delBtn);
+      actionsCell.appendChild(actions);
+      tr.appendChild(actionsCell);
+
+      els.tableBody.appendChild(tr);
+    });
+  }
+  function td(text) { var el = document.createElement("td"); el.textContent = text; return el; }
+
+  document.querySelectorAll("#sessionsTable th[data-key]").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var key = th.getAttribute("data-key");
+      if (sort.key === key) sort.dir = sort.dir === "asc" ? "desc" : "asc";
+      else { sort.key = key; sort.dir = "asc"; }
+      renderAll();
+    });
+  });
+
+  function esc(str) {
+    var div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+  }
+
+  /* ---------- master render ---------- */
+  function renderAll() {
+    populateFilterOptions();
+    var data = filteredSessions();
+    els.filterCount.textContent = data.length + " of " + sessions.length + " sessions";
+    els.tableCount.textContent = data.length + " session" + (data.length === 1 ? "" : "s");
+    renderKPIs(data);
+    renderSessionsChart(data);
+    renderAvgByType(data);
+    renderCarerBreakdown(data);
+    renderWakeupsByDay(data);
+    renderTechniques(data);
+    renderTable(data);
+  }
+
+  /* ---------- modal / CRUD ---------- */
+  var f = {
+    date: document.getElementById("f-date"),
+    type: document.getElementById("f-type"),
+    typeOtherWrap: document.getElementById("f-type-other-wrap"),
+    typeOther: document.getElementById("f-type-other"),
+    start: document.getElementById("f-start"),
+    end: document.getElementById("f-end"),
+    carer: document.getElementById("f-carer"),
+    method: document.getElementById("f-method"),
+    notes: document.getElementById("f-notes")
+  };
+  var durationHint = document.getElementById("durationHint");
+
+  function openModal(id) {
+    editingId = id || null;
+    var s = id ? sessions.find(function (x) { return x.id === id; }) : null;
+
+    els.modalTitle.textContent = s ? "Edit session" : "Log a session";
+    els.deleteBtn.style.display = s ? "inline-flex" : "none";
+
+    if (s) {
+      f.date.value = s.date;
+      var known = ["Nap", "Bedtime", "Night wake-up"];
+      if (known.indexOf(s.eventType) !== -1) { f.type.value = s.eventType; f.typeOtherWrap.style.display = "none"; }
+      else { f.type.value = "__other"; f.typeOtherWrap.style.display = "block"; f.typeOther.value = s.eventType; }
+      f.start.value = s.startTime || "";
+      f.end.value = s.endTime || "";
+      f.carer.value = s.carer || "";
+      f.method.value = s.method || "";
+      f.notes.value = s.notes || "";
+    } else {
+      els.sessionForm.reset();
+      f.date.value = new Date().toISOString().slice(0, 10);
+      f.type.value = "Nap";
+      f.typeOtherWrap.style.display = "none";
+    }
+    updateDurationHint();
+    els.modalOverlay.classList.add("open");
+    f.date.focus();
+  }
+  function closeModal() {
+    els.modalOverlay.classList.remove("open");
+    editingId = null;
+  }
+
+  f.type.addEventListener("change", function () {
+    f.typeOtherWrap.style.display = f.type.value === "__other" ? "block" : "none";
+  });
+  [f.start, f.end].forEach(function (el) { el.addEventListener("change", updateDurationHint); });
+  function updateDurationHint() {
+    if (!f.start.value) { durationHint.textContent = ""; return; }
+    if (!f.end.value) { durationHint.textContent = "No end time — settle duration won't be tracked for this session."; return; }
+    var start = toMinutes(f.start.value), end = toMinutes(f.end.value);
+    if (end < start) end += 24 * 60;
+    durationHint.textContent = "Settle time: " + fmtDuration(end - start) + (end - start > 240 ? " — check the times if that looks too long." : "");
+  }
+
+  document.getElementById("addBtn").addEventListener("click", function () { openModal(null); });
+  document.getElementById("cancelBtn").addEventListener("click", closeModal);
+  els.modalOverlay.addEventListener("click", function (e) { if (e.target === els.modalOverlay) closeModal(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && els.modalOverlay.classList.contains("open")) closeModal(); });
+
+  els.deleteBtn.addEventListener("click", function () {
+    if (editingId) deleteSession(editingId);
+    closeModal();
+  });
+
+  function deleteSession(id) {
+    if (!confirm("Delete this session? This can't be undone.")) return;
+    sessions = sessions.filter(function (s) { return s.id !== id; });
+    persist(sessions);
+    renderAll();
+  }
+
+  els.sessionForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var type = f.type.value === "__other" ? (f.typeOther.value.trim() || "Other") : f.type.value;
+    var record = {
+      id: editingId || ("s-" + Date.now() + "-" + Math.round(Math.random() * 1e4)),
+      date: f.date.value,
+      startTime: f.start.value,
+      endTime: f.end.value || null,
+      eventType: type,
+      carer: f.carer.value.trim(),
+      method: f.method.value.trim(),
+      notes: f.notes.value.trim()
+    };
+    ensureTypeKnown(type);
+    if (editingId) {
+      sessions = sessions.map(function (s) { return s.id === editingId ? record : s; });
+    } else {
+      sessions.push(record);
+    }
+    persist(sessions);
+    closeModal();
+    renderAll();
+  });
+
+  /* ---------- export ---------- */
+  document.getElementById("exportBtn").addEventListener("click", function () {
+    var header = ["Date", "Start", "End", "Event type", "Carer", "How he settled", "Notes", "Settle time (min)"];
+    var rows = sessions.slice().sort(function (a, b) { return (a.date + a.startTime).localeCompare(b.date + b.startTime); })
+      .map(function (s) {
+        return [s.date, s.startTime, s.endTime || "", s.eventType, s.carer, s.method, s.notes, durationOf(s) == null ? "" : String(durationOf(s))];
+      });
+    var csv = [header].concat(rows).map(function (row) {
+      return row.map(csvCell).join(",");
+    }).join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "sleep-log-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+  function csvCell(v) {
+    v = v == null ? "" : String(v);
+    if (/[",\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+    return v;
+  }
+
+  /* ---------- name, theme, banner ---------- */
+  var babyNameInput = document.getElementById("babyName");
+  babyNameInput.value = localStorage.getItem(NAME_KEY) || "Baby";
+  babyNameInput.addEventListener("change", function () {
+    localStorage.setItem(NAME_KEY, babyNameInput.value.trim() || "Baby");
+  });
+  babyNameInput.addEventListener("input", function () {
+    babyNameInput.style.width = Math.max(56, babyNameInput.value.length * 13 + 14) + "px";
+  });
+  babyNameInput.dispatchEvent(new Event("input"));
+
+  var themeToggle = document.getElementById("themeToggle");
+  var savedTheme = localStorage.getItem(THEME_KEY);
+  if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
+  updateThemeIcon();
+  themeToggle.addEventListener("click", function () {
+    var current = document.documentElement.getAttribute("data-theme");
+    var next = current === "dark" ? "light" : current === "light" ? null : "dark";
+    if (next) document.documentElement.setAttribute("data-theme", next);
+    else document.documentElement.removeAttribute("data-theme");
+    if (next) localStorage.setItem(THEME_KEY, next); else localStorage.removeItem(THEME_KEY);
+    updateThemeIcon();
+    renderAll();
+  });
+  function updateThemeIcon() {
+    var current = document.documentElement.getAttribute("data-theme");
+    themeToggle.textContent = current === "dark" ? "🌙" : current === "light" ? "☀️" : "◐";
+    themeToggle.title = "Theme: " + (current || "system");
+  }
+
+  var banner = document.getElementById("storageBanner");
+  if (localStorage.getItem(BANNER_KEY)) banner.style.display = "none";
+  document.getElementById("dismissBanner").addEventListener("click", function () {
+    banner.style.display = "none";
+    localStorage.setItem(BANNER_KEY, "1");
+  });
+
+  window.addEventListener("resize", debounce(renderAll, 200));
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
