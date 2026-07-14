@@ -333,8 +333,71 @@
     font-size: 0.76rem; color: var(--text-muted);
   }
 
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: var(--overlay);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface-2);
+    border-radius: 14px;
+    padding: 22px 22px 18px;
+    width: 100%;
+    max-width: 480px;
+    border: 1px solid var(--border);
+  }
+  .modal h2 { margin: 0 0 6px; font-size: 1.05rem; }
+  .modal .modal-intro { font-size: 0.8rem; color: var(--text-secondary); margin: 0 0 16px; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
+  .field input, .field select, .field textarea {
+    width: 100%;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.88rem;
+  }
+  .field textarea { resize: vertical; min-height: 52px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .modal-skip { text-align: center; margin-top: 14px; font-size: 0.78rem; }
+  .modal-skip a { color: var(--series-1); }
+
+  .copy-panel { text-align: center; }
+  .copy-panel .big-check { font-size: 2.2rem; margin-bottom: 6px; }
+  .copy-panel ol { text-align: left; font-size: 0.86rem; color: var(--text-secondary); padding-left: 20px; margin: 14px 0; }
+  .copy-panel ol li { margin-bottom: 6px; }
+  .copy-preview {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.76rem;
+    font-family: ui-monospace, monospace;
+    color: var(--text-secondary);
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 10px 0;
+  }
+  .copy-fallback { display: none; }
+  .copy-fallback.show { display: block; }
+  .copy-fallback textarea {
+    width: 100%; min-height: 60px;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 0.78rem; font-family: ui-monospace, monospace;
+  }
+
   @media (max-width: 760px) {
     .charts-grid { grid-template-columns: 1fr; }
+    .field-row { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -352,7 +415,7 @@
       <span class="sync-status" id="syncStatus">● Connecting…</span>
       <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
       <button class="btn" id="exportBtn">Export CSV</button>
-      <a class="btn btn-primary" id="openSheetBtn" href="#" target="_blank" rel="noopener">Log a session</a>
+      <button class="btn btn-primary" id="addBtn">+ Log a session</button>
     </div>
   </header>
 
@@ -441,6 +504,88 @@
   </footer>
 </div>
 
+<div class="modal-overlay" id="modalOverlay">
+  <form class="modal" id="sessionForm">
+    <h2>Log a session</h2>
+    <p class="modal-intro">Fill this in, then paste it into the sheet as one row — faster than typing across six cells.</p>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="f-date">Date</label>
+        <input type="date" id="f-date" required>
+      </div>
+      <div class="field">
+        <label for="f-type">Event type</label>
+        <select id="f-type">
+          <option value="Nap time">Nap</option>
+          <option value="Bedtime">Bedtime</option>
+          <option value="Night wake-up">Night wake-up</option>
+          <option value="__other">Other…</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="f-type-other-wrap" style="display:none;">
+      <label for="f-type-other">Custom event type</label>
+      <input type="text" id="f-type-other" placeholder="e.g. Nap 2">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="f-start">Settling started</label>
+        <input type="time" id="f-start" required>
+      </div>
+      <div class="field">
+        <label for="f-end">Settled / asleep by</label>
+        <input type="time" id="f-end">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="f-carer">Carer</label>
+      <input type="text" id="f-carer" list="carerOptions" placeholder="Rosie, Dave, Pia, or “-” for self-settled">
+      <datalist id="carerOptions"></datalist>
+    </div>
+
+    <div class="field">
+      <label for="f-method">How he settled</label>
+      <textarea id="f-method" placeholder="e.g. Rocked to drowsy, patted in cot"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="f-notes">Notes (suspected reasons, circumstances)</label>
+      <textarea id="f-notes" placeholder="e.g. teething, vaccination, routine change…"></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn" id="cancelBtn">Cancel</button>
+      <button type="submit" class="btn btn-primary">Copy row</button>
+    </div>
+
+    <p class="modal-skip">Don't need the form? <a href="#" id="skipToSheetLink">Open the sheet directly</a></p>
+  </form>
+
+  <div class="modal" id="copyPanel" style="display:none;">
+    <div class="copy-panel">
+      <div class="big-check">📋</div>
+      <h2 id="copyPanelTitle">Copied to your clipboard</h2>
+      <ol>
+        <li>Tap <strong>Open sheet</strong> below</li>
+        <li>Tap the first empty cell in column A (under the last row)</li>
+        <li>Paste — all 6 cells fill in at once</li>
+      </ol>
+      <div class="copy-preview" id="copyPreview"></div>
+      <div class="copy-fallback" id="copyFallback">
+        <p class="field-hint">Clipboard copy didn't work automatically — select the text below and copy it manually:</p>
+        <textarea id="copyFallbackText" readonly onclick="this.select()"></textarea>
+      </div>
+      <div class="modal-actions" style="justify-content: center;">
+        <button type="button" class="btn" id="copyPanelCloseBtn">Close</button>
+        <a class="btn btn-primary" id="copyPanelOpenSheetBtn" href="#" target="_blank" rel="noopener">Open sheet</a>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
 
 <script>
@@ -461,7 +606,8 @@
   var SVG_NS = "http://www.w3.org/2000/svg";
   var POLL_MS = 30000;
 
-  document.getElementById("openSheetBtn").href = EDIT_URL;
+  document.getElementById("skipToSheetLink").href = EDIT_URL;
+  document.getElementById("copyPanelOpenSheetBtn").href = EDIT_URL;
 
   /* ---------- state ---------- */
   var sessions = [];
@@ -711,6 +857,14 @@
     var carers = uniqueSorted(sessions.map(function (s) { return s.carer; }).filter(function (c) { return c && c !== "-"; }));
     fillSelect(els.filterType, ["all"].concat(types), function (v) { return v === "all" ? "All types" : v; });
     fillSelect(els.filterCarer, ["all"].concat(carers), function (v) { return v === "all" ? "All carers" : v; });
+
+    var carerOptions = document.getElementById("carerOptions");
+    carerOptions.innerHTML = "";
+    carers.forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = c;
+      carerOptions.appendChild(opt);
+    });
   }
   function fillSelect(select, values, labelFn) {
     var current = select.value;
@@ -1273,6 +1427,85 @@
     if (/[",\r\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
     return v;
   }
+
+  /* ---------- log-a-session modal (copy-to-paste, no direct write) ---------- */
+  var modalOverlay = document.getElementById("modalOverlay");
+  var sessionForm = document.getElementById("sessionForm");
+  var copyPanel = document.getElementById("copyPanel");
+  var fType = document.getElementById("f-type");
+  var fTypeOtherWrap = document.getElementById("f-type-other-wrap");
+  var fTypeOther = document.getElementById("f-type-other");
+  var fDate = document.getElementById("f-date");
+  var fStart = document.getElementById("f-start");
+  var fEnd = document.getElementById("f-end");
+  var fCarer = document.getElementById("f-carer");
+  var fMethod = document.getElementById("f-method");
+  var fNotes = document.getElementById("f-notes");
+
+  function fmtDateForSheet(iso) {
+    var d = new Date(iso + "T00:00:00");
+    var month = MONTHS[d.getMonth()];
+    return d.getDate() + " " + month.charAt(0).toUpperCase() + month.slice(1);
+  }
+
+  function openLogModal() {
+    sessionForm.reset();
+    fDate.value = new Date().toISOString().slice(0, 10);
+    fType.value = "Nap time";
+    fTypeOtherWrap.style.display = "none";
+    sessionForm.style.display = "block";
+    copyPanel.style.display = "none";
+    modalOverlay.classList.add("open");
+    fDate.focus();
+  }
+  function closeLogModal() {
+    modalOverlay.classList.remove("open");
+  }
+  document.getElementById("addBtn").addEventListener("click", openLogModal);
+  document.getElementById("cancelBtn").addEventListener("click", closeLogModal);
+  document.getElementById("copyPanelCloseBtn").addEventListener("click", closeLogModal);
+  modalOverlay.addEventListener("click", function (e) { if (e.target === modalOverlay) closeLogModal(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && modalOverlay.classList.contains("open")) closeLogModal(); });
+  document.getElementById("skipToSheetLink").addEventListener("click", function () { closeLogModal(); });
+
+  fType.addEventListener("change", function () {
+    fTypeOtherWrap.style.display = fType.value === "__other" ? "block" : "none";
+  });
+
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return false; });
+    }
+    return Promise.resolve(false);
+  }
+
+  sessionForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var type = fType.value === "__other" ? (fTypeOther.value.trim() || "Other") : fType.value;
+    var dateLabel = fmtDateForSheet(fDate.value);
+    var timeLabel = fStart.value ? (fEnd.value ? (fStart.value + "-" + fEnd.value) : fStart.value) : "";
+    var carer = fCarer.value.trim();
+    var method = fMethod.value.trim();
+    var notes = fNotes.value.trim();
+    var fields = [dateLabel, timeLabel, type, carer, method, notes];
+    var tsvRow = fields.join("\t");
+
+    document.getElementById("copyPreview").textContent = fields.filter(Boolean).join(" · ");
+    document.getElementById("copyFallbackText").value = tsvRow;
+    document.getElementById("copyFallback").classList.remove("show");
+
+    sessionForm.style.display = "none";
+    copyPanel.style.display = "block";
+
+    copyToClipboard(tsvRow).then(function (ok) {
+      if (ok) {
+        document.getElementById("copyPanelTitle").textContent = "Copied to your clipboard";
+      } else {
+        document.getElementById("copyPanelTitle").textContent = "Copy this row manually";
+        document.getElementById("copyFallback").classList.add("show");
+      }
+    });
+  });
 
   /* ---------- name, theme ---------- */
   var babyNameInput = document.getElementById("babyName");
