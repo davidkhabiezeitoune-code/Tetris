@@ -94,9 +94,22 @@
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
   }
-  .top-bar-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
-  .top-bar-title .app-icon { font-size: 1.6rem; flex: none; }
+  .top-bar-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .top-bar-title h1 { font-size: 1.15rem; margin: 0; font-weight: 800; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .avatar {
+    border-radius: 50%;
+    object-fit: cover;
+    flex: none;
+    border: 2px solid var(--series-1);
+    display: block;
+  }
+  .avatar-sm { width: 38px; height: 38px; }
+  .avatar-lg { width: 64px; height: 64px; border-width: 3px; }
+
+  .settings-profile { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .settings-profile-name { font-size: 1.15rem; font-weight: 800; }
+  .settings-profile-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
 
   button, select, input {
     font: inherit;
@@ -346,13 +359,6 @@
   .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid var(--gridline); gap: 12px; }
   .settings-row:last-child { border-bottom: none; }
   .settings-row .settings-label { font-weight: 600; font-size: 0.98rem; }
-  .settings-row .name-edit {
-    text-align: right;
-    background: transparent; border: none; border-bottom: 1px dashed var(--border);
-    color: inherit; font: inherit; font-weight: 700;
-    padding: 0 2px; width: 130px;
-  }
-  .settings-row .name-edit:focus { outline: none; border-bottom-color: var(--series-1); }
   .app-footer-text { font-size: 0.78rem; color: var(--text-muted); margin: 4px 4px 0; line-height: 1.4; }
 
   .bottom-nav {
@@ -454,8 +460,8 @@
 
   <header class="top-bar">
     <div class="top-bar-title">
-      <span class="app-icon">🌙</span>
-      <h1 id="appTitle">Baby's Sleep Tracker</h1>
+      <img class="avatar avatar-sm" src="felix.jpg" alt="Felix">
+      <h1>Felix's Sleep Tracker</h1>
     </div>
     <span class="sync-status" id="syncStatus" title="Connecting…">●</span>
   </header>
@@ -546,11 +552,14 @@
 
     <section class="page" id="page-settings">
       <h2 class="section-title">Settings</h2>
-      <div class="settings-group">
-        <div class="settings-row">
-          <span class="settings-label">Baby's name</span>
-          <input id="babyName" class="name-edit" value="Baby" aria-label="Baby's name">
+      <div class="settings-profile">
+        <img class="avatar avatar-lg" src="felix.jpg" alt="Felix">
+        <div>
+          <div class="settings-profile-name">Felix</div>
+          <div class="settings-profile-sub">Sleeping like a champ 😴</div>
         </div>
+      </div>
+      <div class="settings-group">
         <div class="settings-row">
           <span class="settings-label">Theme</span>
           <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
@@ -684,7 +693,6 @@
   var CSV_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/export?format=csv";
   var EDIT_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
-  var NAME_KEY = "sleepTracker.babyName";
   var THEME_KEY = "sleepTracker.theme";
 
   var SVG_NS = "http://www.w3.org/2000/svg";
@@ -1650,19 +1658,7 @@
     });
   });
 
-  /* ---------- name, theme ---------- */
-  var babyNameInput = document.getElementById("babyName");
-  var appTitle = document.getElementById("appTitle");
-  function updateAppTitle() {
-    var name = babyNameInput.value.trim() || "Baby";
-    appTitle.textContent = name + "'s Sleep Tracker";
-  }
-  babyNameInput.value = localStorage.getItem(NAME_KEY) || "Baby";
-  updateAppTitle();
-  babyNameInput.addEventListener("input", updateAppTitle);
-  babyNameInput.addEventListener("change", function () {
-    localStorage.setItem(NAME_KEY, babyNameInput.value.trim() || "Baby");
-  });
+  /* ---------- theme ---------- */
 
   var themeToggle = document.getElementById("themeToggle");
   var savedTheme = localStorage.getItem(THEME_KEY);
