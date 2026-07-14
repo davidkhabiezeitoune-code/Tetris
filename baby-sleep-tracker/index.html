@@ -164,6 +164,20 @@
     align-items: center;
   }
   .banner button { margin-left: auto; }
+  .banner.error { border-color: var(--status-critical); }
+  .banner code { background: var(--surface-1); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+
+  .sync-status {
+    font-size: 0.78rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+    padding: 0 6px;
+  }
+  .sync-status.ok { color: var(--status-good); }
+  .sync-status.connecting { color: var(--text-muted); }
+  .sync-status.error, .sync-status.unconfigured { color: var(--status-critical); }
 
   .filter-row {
     display: flex;
@@ -377,15 +391,15 @@
       <p class="subtitle">Every nap, bedtime and night wake-up — how it went, who was on duty, what helped.</p>
     </div>
     <div class="top-actions">
+      <span class="sync-status" id="syncStatus">● Connecting…</span>
       <button class="btn btn-ghost btn-icon" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">◐</button>
       <button class="btn" id="exportBtn">Export CSV</button>
       <button class="btn btn-primary" id="addBtn">+ Log a session</button>
     </div>
   </header>
 
-  <div class="banner" id="storageBanner">
-    <span>💾 Data lives in this browser only (no server) — use <strong>Export CSV</strong> regularly to back it up or move it to another device.</span>
-    <button class="btn btn-ghost" id="dismissBanner" aria-label="Dismiss">✕</button>
+  <div class="banner error" id="setupBanner" style="display:none;">
+    <span>⚙️ Not connected to the shared database yet. Open <code>index.html</code>, set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top of the script (see <code>README.md</code> for setup steps), then reload.</span>
   </div>
 
   <section class="filter-row" aria-label="Filters">
@@ -465,7 +479,7 @@
   </section>
 
   <footer class="app-footer">
-    Built from your sleep log spreadsheet · data stays local to this browser.
+    Shared with every carer via Supabase — changes made on one device appear on all others.
   </footer>
 </div>
 
@@ -533,66 +547,81 @@
 
 <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "sleepTracker.sessions.v1";
+  /* ---------- Supabase config ----------
+     1. Create a free project at https://supabase.com
+     2. Run supabase/schema.sql (in this repo) in the SQL editor
+     3. Copy Project URL + anon public key from Settings > API and paste below
+  */
+  var SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
+  var SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
   var NAME_KEY = "sleepTracker.babyName";
   var THEME_KEY = "sleepTracker.theme";
-  var BANNER_KEY = "sleepTracker.bannerDismissed";
 
   var SVG_NS = "http://www.w3.org/2000/svg";
 
-  /* ---------- seed data (from the spreadsheet) ---------- */
-  var RAW_SEED = [
-    ["2026-07-06","12:10","12:15","Nap","Rosie","Quick cuddle, put down awake, pat to sleep circa 5 mins","Wanted to be put down"],
-    ["2026-07-06","19:30","20:00","Bedtime","Dave","Rock to sleep; transfer deeply asleep","Tried rocking to transfer drowsy but didn't work; first 1 nap day, should have been tired"],
-    ["2026-07-06","23:30","01:30","Night wake-up","Dave","Floorbed co-sleeping","Wake up reason unknown; attempted 10min CIO then would fall asleep quickly on Dave but not transfer; first day of successful 1 day nap day"],
-    ["2026-07-07","12:10","12:15","Nap","Rosie","Quick cuddle, put down drowsy, pat to sleep","Was being wriggly and pointing at door, gently rocked him till rubbing eyes (circa 2/3 mins) put down drowsy and then firm pats and shush for a couple mins till asleep"],
-    ["2026-07-07","19:30","19:35","Bedtime","Dave","Rocked to sleep but it only took two minutes of hypnotist voice. Cuddled on chair then transferred asleep",""],
-    ["2026-07-08","12:10","","Nap","-","Fell asleep in car","Transferred to cot but woke up after 1.5h"],
-    ["2026-07-08","20:00","20:10","Bedtime","Pia","(Post vomit) Bottle and short cuddle on armchair; transfer asleep","Initially accepted being put down into his cot immediately after stories and attempted to wind himself down with me next to him, but a bit of coughing triggered a vomit"],
-    ["2026-07-09","06:25","06:50","Night wake-up","-","Played and self settled",""],
-    ["2026-07-09","12:45","12:55","Nap","Rosie","Cuddled till drowsy(ish) and then patted till sleep.","Initial try unsuccessful, but worked after 1 min more cuddles. He wanted to be put in the cot. Was acting not tired the whole time I was holding him"],
-    ["2026-07-09","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
-    ["2026-07-10","12:25","12:40","Nap","Rosie","Rocked to very drowsy, took a bit longer to settle due to light. Patted until fully asleep for about 3/4 mins",""],
-    ["2026-07-10","19:25","19:40","Bedtime","Dave","Rocked to sleep as too light in room to settle himself",""],
-    ["2026-07-11","13:00","13:05","Nap","Rosie","Rocked until slightly drowsy, patted in cot couple minutes",""],
-    ["2026-07-11","20:05","20:45","Bedtime","Rosie","Up and down in cot, very resistant. Eventually put down almost asleep and then patted",""],
-    ["2026-07-12","12:30","12:55","Nap","Rosie","Initially very upset, had to come downstairs and reset. Once back in room, rocked until just asleep then patted. Had to really encourage the sleep",""],
-    ["2026-07-12","19:25","19:40","Bedtime","Dave","Rock to sleep; transfer deeply asleep",""],
-    ["2026-07-13","12:25","12:30","Nap","Rosie","Walked around with him until literally just asleep, transferred immediately and patted while he waa waaed until asleep",""],
-    ["2026-07-13","19:25","19:45","Bedtime","Dave","Rock to sleep; transfer deeply asleep. Quite tricky - he was very vocal the whole time.",""],
-    ["2026-07-13","21:10","21:30","Night wake-up","Pia","Milk, snuggle, a couple of transfer attempts;","Initially refused milk but then had it; seemed unsettled; perhaps a belly ache as he had a troubled gut during the day?"]
-  ];
-
-  function seedSessions() {
-    return RAW_SEED.map(function (r, i) {
-      return {
-        id: "seed-" + i,
-        date: r[0], startTime: r[1], endTime: r[2] || null,
-        eventType: r[3], carer: r[4], method: r[5], notes: r[6]
-      };
-    });
-  }
+  var isConfigured = SUPABASE_URL.indexOf("YOUR_SUPABASE") === -1 && SUPABASE_ANON_KEY.indexOf("YOUR_SUPABASE") === -1;
+  var sb = (isConfigured && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
   /* ---------- state ---------- */
-  var sessions = loadSessions();
+  var sessions = [];
   var sort = { key: "date", dir: "desc" };
   var editingId = null;
 
-  function loadSessions() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) {}
-    var seed = seedSessions();
-    persist(seed);
-    return seed;
+  function rowToSession(row) {
+    return {
+      id: row.id,
+      date: row.date,
+      startTime: (row.start_time || "").slice(0, 5),
+      endTime: row.end_time ? row.end_time.slice(0, 5) : null,
+      eventType: row.event_type,
+      carer: row.carer || "",
+      method: row.method || "",
+      notes: row.notes || ""
+    };
   }
-  function persist(list) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
+  function sessionToRow(s) {
+    return {
+      date: s.date,
+      start_time: s.startTime,
+      end_time: s.endTime || null,
+      event_type: s.eventType,
+      carer: s.carer || null,
+      method: s.method || null,
+      notes: s.notes || null
+    };
+  }
+
+  function setSyncStatus(state, message) {
+    var el = document.getElementById("syncStatus");
+    var banner = document.getElementById("setupBanner");
+    if (!el) return;
+    el.className = "sync-status " + state;
+    if (state === "ok") { el.textContent = "● Synced"; el.title = "Connected to the shared database"; banner.style.display = "none"; }
+    else if (state === "connecting") { el.textContent = "● Connecting…"; el.title = ""; banner.style.display = "none"; }
+    else if (state === "error") { el.textContent = "● Sync error"; el.title = message || ""; banner.style.display = "none"; }
+    else { el.textContent = "● Not connected"; el.title = ""; banner.style.display = "flex"; }
+  }
+
+  async function fetchSessions() {
+    if (!sb) return;
+    var res = await sb.from("sessions").select("*");
+    if (res.error) { setSyncStatus("error", res.error.message); return; }
+    sessions = res.data.map(rowToSession);
+    setSyncStatus("ok");
+    renderAll();
+  }
+
+  function subscribeRealtime() {
+    if (!sb) return;
+    sb.channel("sessions-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sessions" }, function () { fetchSessions(); })
+      .subscribe();
   }
 
   /* ---------- time helpers ---------- */
@@ -1303,18 +1332,19 @@
     closeModal();
   });
 
-  function deleteSession(id) {
+  async function deleteSession(id) {
     if (!confirm("Delete this session? This can't be undone.")) return;
-    sessions = sessions.filter(function (s) { return s.id !== id; });
-    persist(sessions);
-    renderAll();
+    if (!sb) { alert("Not connected to the shared database yet."); return; }
+    var res = await sb.from("sessions").delete().eq("id", id);
+    if (res.error) { alert("Couldn't delete: " + res.error.message); return; }
+    await fetchSessions();
   }
 
-  els.sessionForm.addEventListener("submit", function (e) {
+  els.sessionForm.addEventListener("submit", async function (e) {
     e.preventDefault();
+    if (!sb) { alert("Not connected to the shared database yet."); return; }
     var type = f.type.value === "__other" ? (f.typeOther.value.trim() || "Other") : f.type.value;
-    var record = {
-      id: editingId || ("s-" + Date.now() + "-" + Math.round(Math.random() * 1e4)),
+    var row = sessionToRow({
       date: f.date.value,
       startTime: f.start.value,
       endTime: f.end.value || null,
@@ -1322,16 +1352,19 @@
       carer: f.carer.value.trim(),
       method: f.method.value.trim(),
       notes: f.notes.value.trim()
-    };
+    });
+
+    var saveBtn = els.sessionForm.querySelector("button[type=submit]");
+    saveBtn.disabled = true;
+    var res = editingId
+      ? await sb.from("sessions").update(row).eq("id", editingId)
+      : await sb.from("sessions").insert(row);
+    saveBtn.disabled = false;
+
+    if (res.error) { alert("Couldn't save: " + res.error.message); return; }
     ensureTypeKnown(type);
-    if (editingId) {
-      sessions = sessions.map(function (s) { return s.id === editingId ? record : s; });
-    } else {
-      sessions.push(record);
-    }
-    persist(sessions);
     closeModal();
-    renderAll();
+    await fetchSessions();
   });
 
   /* ---------- export ---------- */
@@ -1390,16 +1423,16 @@
     themeToggle.title = "Theme: " + (current || "system");
   }
 
-  var banner = document.getElementById("storageBanner");
-  if (localStorage.getItem(BANNER_KEY)) banner.style.display = "none";
-  document.getElementById("dismissBanner").addEventListener("click", function () {
-    banner.style.display = "none";
-    localStorage.setItem(BANNER_KEY, "1");
-  });
+  window.addEventListener("resize", debounce(function () { if (!document.hidden) renderAll(); }, 200));
 
-  window.addEventListener("resize", debounce(renderAll, 200));
-
-  renderAll();
+  if (!sb) {
+    setSyncStatus("unconfigured");
+    renderAll();
+  } else {
+    setSyncStatus("connecting");
+    fetchSessions();
+    subscribeRealtime();
+  }
 })();
 </script>
 </body>
