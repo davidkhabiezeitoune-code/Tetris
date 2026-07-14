@@ -691,12 +691,14 @@
   */
   var SHEET_ID = "1086aJ9KzV_ZBd-ZkOtnumy0B5s5DO3L5_vEYTEv0BVo";
   var CSV_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/export?format=csv";
+  var GVIZ_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/gviz/tq?tqx=out:json";
   var EDIT_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit";
 
   var THEME_KEY = "sleepTracker.theme";
 
   var SVG_NS = "http://www.w3.org/2000/svg";
   var POLL_MS = 30000;
+  var FETCH_TIMEOUT_MS = 10000;
 
   document.getElementById("skipToSheetLink").href = EDIT_URL;
   document.getElementById("copyPanelOpenSheetBtn").href = EDIT_URL;
@@ -854,19 +856,64 @@
     }
   }
 
+  function fetchWithTimeout(url, ms) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, ms);
+    return fetch(url, { cache: "no-store", signal: controller.signal }).finally(function () {
+      clearTimeout(timer);
+    });
+  }
+
+  function parseGvizResponse(text) {
+    var start = text.indexOf("{");
+    var end = text.lastIndexOf("}");
+    if (start === -1 || end === -1) throw new Error("Unexpected sheet response");
+    var json = JSON.parse(text.slice(start, end + 1));
+    var headers = json.table.cols.map(function (c) { return c.label || ""; });
+    var dataRows = json.table.rows.map(function (r) {
+      return r.c.map(function (cell) {
+        if (!cell) return "";
+        return cell.f != null ? cell.f : (cell.v != null ? String(cell.v) : "");
+      });
+    });
+    return [headers].concat(dataRows);
+  }
+
+  async function fetchViaCSV() {
+    var res = await fetchWithTimeout(CSV_URL + "&t=" + Date.now(), FETCH_TIMEOUT_MS);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    var text = await res.text();
+    return parseCSV(text);
+  }
+
+  async function fetchViaGviz() {
+    var res = await fetchWithTimeout(GVIZ_URL + "&t=" + Date.now(), FETCH_TIMEOUT_MS);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    var text = await res.text();
+    return parseGvizResponse(text);
+  }
+
   async function fetchSessions() {
     setSyncStatus("connecting");
+    var rows = null, lastErr = null;
     try {
-      var res = await fetch(CSV_URL + "&t=" + Date.now(), { cache: "no-store" });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      var text = await res.text();
-      var rows = parseCSV(text);
+      rows = await fetchViaCSV();
+    } catch (err1) {
+      lastErr = err1;
+      try {
+        rows = await fetchViaGviz();
+      } catch (err2) {
+        lastErr = err2;
+      }
+    }
+
+    if (rows) {
       sessions = rowsToSessions(rows);
       TYPE_ORDER.length = 0;
       ["Nap", "Bedtime", "Night wake-up"].forEach(ensureTypeKnown);
       setSyncStatus("ok");
-    } catch (err) {
-      setSyncStatus("error", err.message);
+    } else {
+      setSyncStatus("error", lastErr ? lastErr.message : "Unknown error");
     }
     renderAll();
   }
