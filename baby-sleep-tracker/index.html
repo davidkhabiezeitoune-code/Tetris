@@ -1529,30 +1529,30 @@
     var types = TYPE_ORDER.filter(function (t) { return withStart.some(function (s) { return s.eventType === t; }); });
     if (!types.length) { scroll.innerHTML = '<p class="empty-chart">No sessions with a recorded time in this range.</p>'; return; }
 
-    var padL = 92, padR = 14, padT = 10, padB = 26;
-    var rowH = 42;
-    var plotW = 250;
-    var w = padL + plotW + padR, h = types.length * rowH + padT + padB;
+    var padL = 56, padR = 16, padT = 10, padB = 30;
+    var plotH = 420;
+    var columnW = 84;
+    var plotW = types.length * columnW;
+    var w = padL + plotW + padR, h = padT + plotH + padB;
 
     var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Typical time of day by event type" });
 
-    var plotBottom = padT + types.length * rowH;
     for (var hh = 0; hh <= 24; hh += 4) {
-      var gx = padL + (hh / 24) * plotW;
-      svg.appendChild(svgEl("line", { class: "grid-line", x1: gx, x2: gx, y1: padT, y2: plotBottom }));
+      var gy = padT + (hh / 24) * plotH;
+      svg.appendChild(svgEl("line", { class: "grid-line", x1: padL, x2: padL + plotW, y1: gy, y2: gy }));
       if (hh < 24) {
-        var lbl = svgEl("text", { x: gx, y: plotBottom + 16, "text-anchor": "middle", class: "axis-label" });
+        var lbl = svgEl("text", { x: padL - 8, y: gy + 3, "text-anchor": "end", class: "axis-label" });
         lbl.textContent = axisHoursToLabel(hh);
         svg.appendChild(lbl);
       }
     }
 
     types.forEach(function (type, i) {
-      var rowY = padT + i * rowH;
-      var rowCenter = rowY + rowH / 2;
+      var colX = padL + i * columnW;
+      var colCenter = colX + columnW / 2;
       var colorVar = typeColorVar(type);
 
-      var label = svgEl("text", { x: padL - 10, y: rowCenter + 4, "text-anchor": "end", class: "axis-label" });
+      var label = svgEl("text", { x: colCenter, y: padT + plotH + 20, "text-anchor": "middle", class: "axis-label" });
       label.textContent = type;
       svg.appendChild(label);
 
@@ -1562,9 +1562,9 @@
 
       sessionsOfType.forEach(function (s, j) {
         var ah = timeToAxisHours(s.startTime);
-        var x = padL + (ah / 24) * plotW;
-        var jitter = ((j % 3) - 1) * 7;
-        var y = rowCenter + jitter;
+        var y = padT + (ah / 24) * plotH;
+        var jitter = ((j % 3) - 1) * 9;
+        var x = colCenter + jitter;
         var dot = svgEl("circle", { cx: x, cy: y, r: 5, fill: "var(" + colorVar + ")", opacity: "0.6" });
         var tip = '<div class="t-title">' + esc(type) + '</div>' +
           '<div class="t-row">' + esc(fmtDateFull(s.date)) + '</div>' +
@@ -1574,8 +1574,8 @@
         svg.appendChild(dot);
       });
 
-      var meanX = padL + (meanAh / 24) * plotW;
-      var meanLine = svgEl("line", { x1: meanX, x2: meanX, y1: rowY + 6, y2: rowY + rowH - 6, stroke: "var(" + colorVar + ")", "stroke-width": 3, "stroke-linecap": "round" });
+      var meanY = padT + (meanAh / 24) * plotH;
+      var meanLine = svgEl("line", { x1: colX + 8, x2: colX + columnW - 8, y1: meanY, y2: meanY, stroke: "var(" + colorVar + ")", "stroke-width": 3, "stroke-linecap": "round" });
       var meanTip = '<div class="t-title">' + esc(type) + ' — average</div>' +
         '<div class="t-row">Typical time: <span class="t-value">' + esc(axisHoursToLabel(meanAh)) + '</span></div>' +
         '<div class="t-row">Across ' + sessionsOfType.length + ' session' + (sessionsOfType.length === 1 ? "" : "s") + '</div>';
