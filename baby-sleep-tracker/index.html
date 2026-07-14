@@ -526,6 +526,12 @@
           <div class="chart-scroll"></div>
         </figure>
 
+        <figure class="chart-card" id="chartTimeOfDay">
+          <h2>Typical time of day</h2>
+          <p class="chart-caption">When each event type tends to happen — dots are individual sessions, the thick tick is the average.</p>
+          <div class="chart-scroll"></div>
+        </figure>
+
         <figure class="chart-card" id="chartTechniques">
           <h2>Common settling techniques</h2>
           <p class="chart-caption">Keywords found in "how he settled" — a session can use more than one.</p>
@@ -967,6 +973,34 @@
     var now = new Date(); now.setHours(0, 0, 0, 0);
     return Math.round((now - d) / 86400000);
   }
+  function isoFromDate(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+
+  /* ---------- full date scaffold for time-series charts (always shows every date, not just ones with data) ---------- */
+  function computeDateRange() {
+    var range = els.filterRange.value;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var startDate;
+    if (range === "all") {
+      if (sessions.length) {
+        var minIso = sessions.map(function (s) { return s.date; }).sort()[0];
+        startDate = new Date(minIso + "T00:00:00");
+      } else {
+        startDate = new Date(today); startDate.setDate(startDate.getDate() - 6);
+      }
+    } else {
+      startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - (parseInt(range, 10) - 1));
+    }
+    var dates = [];
+    var d = new Date(startDate);
+    while (d <= today) {
+      dates.push(isoFromDate(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return dates;
+  }
 
   /* ---------- category colors (fixed order = entity identity) ---------- */
   var TYPE_ORDER = [];
@@ -1229,18 +1263,28 @@
     var legend = card.querySelector(".legend");
     scroll.innerHTML = "";
 
-    var withDur = data.filter(function (s) { return durationOf(s) != null; })
-      .slice().sort(function (a, b) { return (a.date + a.startTime).localeCompare(b.date + b.startTime); });
+    var withDur = data.filter(function (s) { return durationOf(s) != null; });
+    var dates = computeDateRange();
+    if (!dates.length) { scroll.innerHTML = '<p class="empty-chart">No date range to show.</p>'; legend.style.display = "none"; return; }
 
-    if (!withDur.length) { scroll.innerHTML = '<p class="empty-chart">No sessions with a recorded end time in this range.</p>'; legend.style.display = "none"; return; }
+    var byDate = {};
+    withDur.forEach(function (s) { (byDate[s.date] = byDate[s.date] || []).push(s); });
+    Object.keys(byDate).forEach(function (d) {
+      byDate[d].sort(function (a, b) { return a.startTime.localeCompare(b.startTime); });
+    });
 
-    var barSlot = 30, barW = 18;
+    var maxPerDate = dates.reduce(function (m, d) { return Math.max(m, (byDate[d] || []).length); }, 1);
+    var barW = 14, barGap = 3, dateGap = 12;
+    var bracketW = maxPerDate * barW + (maxPerDate - 1) * barGap;
+    var dateSlot = bracketW + dateGap;
+
     var padL = 40, padR = 16, padT = 10, padB = 34;
     var plotH = 170;
-    var plotW = Math.max(withDur.length * barSlot, 260);
+    var plotW = Math.max(dates.length * dateSlot, 260);
     var w = plotW + padL + padR, h = plotH + padT + padB;
 
-    var maxVal = Math.max.apply(null, withDur.map(function (s) { return durationOf(s); }));
+    var allDur = withDur.map(function (s) { return durationOf(s); });
+    var maxVal = allDur.length ? Math.max.apply(null, allDur) : 60;
     var step = niceStep(maxVal, 4);
     var niceMax = Math.ceil(maxVal / step) * step;
 
@@ -1255,28 +1299,32 @@
     }
     svg.appendChild(svgEl("line", { class: "baseline-line", x1: padL, x2: padL + plotW, y1: padT + plotH, y2: padT + plotH }));
 
-    var lastDateLabel = null;
-    withDur.forEach(function (s, i) {
-      var dur = durationOf(s);
-      var barH = (dur / niceMax) * plotH;
-      var x = padL + i * barSlot + (barSlot - barW) / 2;
-      var y = padT + plotH - barH;
-      var colorVar = typeColorVar(s.eventType);
-      var path = svgEl("path", { d: roundedTopPath(x, y, barW, barH, 4), fill: "var(" + colorVar + ")" });
-      var tip = '<div class="t-title">' + esc(fmtDateFull(s.date)) + '</div>' +
-        '<div class="t-row"><span class="t-key" style="background:var(' + colorVar + ')"></span>' + esc(s.eventType) + '</div>' +
-        '<div class="t-row">' + esc(timeRangeLabel(s)) + '</div>' +
-        '<div class="t-row">Carer: ' + esc(s.carer || "–") + '</div>' +
-        '<div class="t-row">Settle time: <span class="t-value">' + esc(fmtDuration(dur)) + '</span></div>';
-      attachMarkEvents(path, tip, s.eventType + " on " + fmtDateFull(s.date) + ", settled in " + fmtDuration(dur));
-      svg.appendChild(path);
+    var labelEvery = dates.length > 14 ? Math.ceil(dates.length / 14) : 1;
 
-      var dateLabel = fmtDateLabel(s.date);
-      if (dateLabel !== lastDateLabel) {
-        var dl = svgEl("text", { x: x + barW / 2, y: padT + plotH + 16, "text-anchor": "middle", class: "axis-label" });
-        dl.textContent = dateLabel;
+    dates.forEach(function (date, i) {
+      var bracketX = padL + i * dateSlot;
+      var daySessions = byDate[date] || [];
+
+      daySessions.forEach(function (s, j) {
+        var dur = durationOf(s);
+        var barH = (dur / niceMax) * plotH;
+        var x = bracketX + j * (barW + barGap);
+        var y = padT + plotH - barH;
+        var colorVar = typeColorVar(s.eventType);
+        var path = svgEl("path", { d: roundedTopPath(x, y, barW, barH, 3), fill: "var(" + colorVar + ")" });
+        var tip = '<div class="t-title">' + esc(fmtDateFull(s.date)) + '</div>' +
+          '<div class="t-row"><span class="t-key" style="background:var(' + colorVar + ')"></span>' + esc(s.eventType) + '</div>' +
+          '<div class="t-row">' + esc(timeRangeLabel(s)) + '</div>' +
+          '<div class="t-row">Carer: ' + esc(s.carer || "–") + '</div>' +
+          '<div class="t-row">Settle time: <span class="t-value">' + esc(fmtDuration(dur)) + '</span></div>';
+        attachMarkEvents(path, tip, s.eventType + " on " + fmtDateFull(s.date) + ", settled in " + fmtDuration(dur));
+        svg.appendChild(path);
+      });
+
+      if (i % labelEvery === 0) {
+        var dl = svgEl("text", { x: bracketX + bracketW / 2, y: padT + plotH + 16, "text-anchor": "middle", class: "axis-label" });
+        dl.textContent = fmtDateLabel(date);
         svg.appendChild(dl);
-        lastDateLabel = dateLabel;
       }
     });
 
@@ -1408,19 +1456,19 @@
     var scroll = card.querySelector(".chart-scroll");
     scroll.innerHTML = "";
 
-    var wakeups = data.filter(function (s) { return s.eventType === "Night wake-up"; });
-    if (!wakeups.length) { scroll.innerHTML = '<p class="empty-chart">No night wake-ups in this range.</p>'; return; }
+    var dates = computeDateRange();
+    if (!dates.length) { scroll.innerHTML = '<p class="empty-chart">No date range to show.</p>'; return; }
 
+    var wakeups = data.filter(function (s) { return s.eventType === "Night wake-up"; });
     var counts = {};
     wakeups.forEach(function (s) { counts[s.date] = (counts[s.date] || 0) + 1; });
-    var dates = Object.keys(counts).sort();
 
     var barSlot = 34, barW = 18;
     var padL = 30, padR = 16, padT = 10, padB = 30;
     var plotH = 130;
     var plotW = Math.max(dates.length * barSlot, 200);
     var w = plotW + padL + padR, h = plotH + padT + padB;
-    var maxVal = Math.max.apply(null, dates.map(function (d) { return counts[d]; }));
+    var maxVal = Math.max.apply(null, dates.map(function (d) { return counts[d] || 0; }));
     var niceMax = Math.max(maxVal, 2);
 
     var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Night wake-ups per day" });
@@ -1434,8 +1482,10 @@
     }
     svg.appendChild(svgEl("line", { class: "baseline-line", x1: padL, x2: padL + plotW, y1: padT + plotH, y2: padT + plotH }));
 
+    var labelEvery = dates.length > 14 ? Math.ceil(dates.length / 14) : 1;
+
     dates.forEach(function (d, i) {
-      var count = counts[d];
+      var count = counts[d] || 0;
       var barH = (count / niceMax) * plotH;
       var x = padL + i * barSlot + (barSlot - barW) / 2;
       var y = padT + plotH - barH;
@@ -1444,15 +1494,99 @@
       attachMarkEvents(path, tip, fmtDateFull(d) + ": " + count + " night wake-ups");
       svg.appendChild(path);
 
-      var dl = svgEl("text", { x: x + barW / 2, y: padT + plotH + 16, "text-anchor": "middle", class: "axis-label" });
-      dl.textContent = fmtDateLabel(d);
-      svg.appendChild(dl);
+      if (i % labelEvery === 0) {
+        var dl = svgEl("text", { x: x + barW / 2, y: padT + plotH + 16, "text-anchor": "middle", class: "axis-label" });
+        dl.textContent = fmtDateLabel(d);
+        svg.appendChild(dl);
+      }
     });
 
     scroll.appendChild(svg);
   }
 
-  /* ---------- Chart E: settling techniques (keyword frequency) ---------- */
+  /* ---------- Chart E: typical time of day (distribution + average) ---------- */
+  var DAY_ANCHOR_HOUR = 10; // axis runs 10am -> 10am next day, so naps/bedtime/wake-ups all land clear of the edges
+  function timeToAxisHours(hhmm) {
+    var parts = hhmm.split(":");
+    var total = parseInt(parts[0], 10) + parseInt(parts[1], 10) / 60;
+    return ((total - DAY_ANCHOR_HOUR) + 24) % 24;
+  }
+  function axisHoursToLabel(ah) {
+    var totalMin = Math.round(ah * 60);
+    var h = Math.floor(totalMin / 60), m = totalMin % 60;
+    var realHour = (h + DAY_ANCHOR_HOUR) % 24;
+    var ap = realHour >= 12 ? "PM" : "AM";
+    var h12 = realHour % 12; if (h12 === 0) h12 = 12;
+    return h12 + (m ? ":" + pad2(m) : "") + " " + ap;
+  }
+
+  function renderTimeOfDay(data) {
+    var card = document.getElementById("chartTimeOfDay");
+    var scroll = card.querySelector(".chart-scroll");
+    scroll.innerHTML = "";
+
+    var withStart = data.filter(function (s) { return !!s.startTime; });
+    var types = TYPE_ORDER.filter(function (t) { return withStart.some(function (s) { return s.eventType === t; }); });
+    if (!types.length) { scroll.innerHTML = '<p class="empty-chart">No sessions with a recorded time in this range.</p>'; return; }
+
+    var padL = 92, padR = 14, padT = 10, padB = 26;
+    var rowH = 42;
+    var plotW = 250;
+    var w = padL + plotW + padR, h = types.length * rowH + padT + padB;
+
+    var svg = svgEl("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "group", "aria-label": "Typical time of day by event type" });
+
+    var plotBottom = padT + types.length * rowH;
+    for (var hh = 0; hh <= 24; hh += 4) {
+      var gx = padL + (hh / 24) * plotW;
+      svg.appendChild(svgEl("line", { class: "grid-line", x1: gx, x2: gx, y1: padT, y2: plotBottom }));
+      if (hh < 24) {
+        var lbl = svgEl("text", { x: gx, y: plotBottom + 16, "text-anchor": "middle", class: "axis-label" });
+        lbl.textContent = axisHoursToLabel(hh);
+        svg.appendChild(lbl);
+      }
+    }
+
+    types.forEach(function (type, i) {
+      var rowY = padT + i * rowH;
+      var rowCenter = rowY + rowH / 2;
+      var colorVar = typeColorVar(type);
+
+      var label = svgEl("text", { x: padL - 10, y: rowCenter + 4, "text-anchor": "end", class: "axis-label" });
+      label.textContent = type;
+      svg.appendChild(label);
+
+      var sessionsOfType = withStart.filter(function (s) { return s.eventType === type; });
+      var axisValues = sessionsOfType.map(function (s) { return timeToAxisHours(s.startTime); });
+      var meanAh = axisValues.reduce(function (a, b) { return a + b; }, 0) / axisValues.length;
+
+      sessionsOfType.forEach(function (s, j) {
+        var ah = timeToAxisHours(s.startTime);
+        var x = padL + (ah / 24) * plotW;
+        var jitter = ((j % 3) - 1) * 7;
+        var y = rowCenter + jitter;
+        var dot = svgEl("circle", { cx: x, cy: y, r: 5, fill: "var(" + colorVar + ")", opacity: "0.6" });
+        var tip = '<div class="t-title">' + esc(type) + '</div>' +
+          '<div class="t-row">' + esc(fmtDateFull(s.date)) + '</div>' +
+          '<div class="t-row">Started: <span class="t-value">' + esc(fmtTime12(s.startTime)) + '</span></div>' +
+          (s.carer ? '<div class="t-row">Carer: ' + esc(s.carer) + '</div>' : "");
+        attachMarkEvents(dot, tip, type + " started at " + fmtTime12(s.startTime) + " on " + fmtDateFull(s.date));
+        svg.appendChild(dot);
+      });
+
+      var meanX = padL + (meanAh / 24) * plotW;
+      var meanLine = svgEl("line", { x1: meanX, x2: meanX, y1: rowY + 6, y2: rowY + rowH - 6, stroke: "var(" + colorVar + ")", "stroke-width": 3, "stroke-linecap": "round" });
+      var meanTip = '<div class="t-title">' + esc(type) + ' — average</div>' +
+        '<div class="t-row">Typical time: <span class="t-value">' + esc(axisHoursToLabel(meanAh)) + '</span></div>' +
+        '<div class="t-row">Across ' + sessionsOfType.length + ' session' + (sessionsOfType.length === 1 ? "" : "s") + '</div>';
+      attachMarkEvents(meanLine, meanTip, type + " average time " + axisHoursToLabel(meanAh));
+      svg.appendChild(meanLine);
+    });
+
+    scroll.appendChild(svg);
+  }
+
+  /* ---------- Chart F: settling techniques (keyword frequency) ---------- */
   var TECHNIQUE_KEYWORDS = [
     { label: "Rocking", re: /rock/i },
     { label: "Cuddling", re: /cuddl|snuggl/i },
@@ -1582,6 +1716,7 @@
     renderAvgByType(data);
     renderCarerBreakdown(data);
     renderWakeupsByDay(data);
+    renderTimeOfDay(data);
     renderTechniques(data);
     renderLogList(data);
   }
