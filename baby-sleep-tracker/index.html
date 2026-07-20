@@ -1038,7 +1038,7 @@
 
   function populateFilterOptions() {
     var types = uniqueSorted(sessions.map(function (s) { return s.eventType; }));
-    var carers = uniqueSorted(sessions.map(function (s) { return s.carer; }).filter(function (c) { return c && c !== "-"; }));
+    var carers = uniqueSorted(sessions.reduce(function (acc, s) { return acc.concat(splitCarers(s.carer)); }, []));
     fillSelect(els.filterType, ["all"].concat(types), function (v) { return v === "all" ? "All types" : v; });
     fillSelect(els.filterCarer, ["all"].concat(carers), function (v) { return v === "all" ? "All carers" : v; });
 
@@ -1067,6 +1067,16 @@
     return out.sort();
   }
 
+  // Splits a carer field like "Pia/Dave", "Rosie & Dave", "Rosie and Dave" into
+  // ["Pia","Dave"] / ["Rosie","Dave"] so joint sessions count toward each carer
+  // in the analytics, while the raw text (e.g. in the log) is left untouched.
+  function splitCarers(carerStr) {
+    if (!carerStr) return [];
+    return carerStr.split(/\s*[\/,&]\s*|\s+and\s+/i)
+      .map(function (c) { return c.trim(); })
+      .filter(function (c) { return c && c !== "-"; });
+  }
+
   function filteredSessions() {
     var range = els.filterRange.value;
     var type = els.filterType.value;
@@ -1076,7 +1086,7 @@
     return sessions.filter(function (s) {
       if (range !== "all" && daysAgo(s.date) >= parseInt(range, 10)) return false;
       if (type !== "all" && s.eventType !== type) return false;
-      if (carer !== "all" && s.carer !== carer) return false;
+      if (carer !== "all" && splitCarers(s.carer).indexOf(carer) === -1) return false;
       if (q) {
         var hay = ((s.method || "") + " " + (s.notes || "")).toLowerCase();
         if (hay.indexOf(q) === -1) return false;
@@ -1103,8 +1113,9 @@
 
     var carerCounts = {};
     data.forEach(function (s) {
-      if (!s.carer || s.carer === "-") return;
-      carerCounts[s.carer] = (carerCounts[s.carer] || 0) + 1;
+      splitCarers(s.carer).forEach(function (c) {
+        carerCounts[c] = (carerCounts[c] || 0) + 1;
+      });
     });
     var topCarer = Object.keys(carerCounts).sort(function (a, b) { return carerCounts[b] - carerCounts[a]; })[0];
 
@@ -1398,14 +1409,15 @@
     var legend = card.querySelector(".legend");
     scroll.innerHTML = "";
 
-    var carers = uniqueSorted(data.map(function (s) { return s.carer; }).filter(function (c) { return c && c !== "-"; }));
+    var carers = uniqueSorted(data.reduce(function (acc, s) { return acc.concat(splitCarers(s.carer)); }, []));
     if (!carers.length) { scroll.innerHTML = '<p class="empty-chart">No carer data in this range.</p>'; legend.style.display = "none"; return; }
 
     var matrix = {};
     carers.forEach(function (c) { matrix[c] = {}; });
     data.forEach(function (s) {
-      if (!s.carer || s.carer === "-") return;
-      matrix[s.carer][s.eventType] = (matrix[s.carer][s.eventType] || 0) + 1;
+      splitCarers(s.carer).forEach(function (c) {
+        matrix[c][s.eventType] = (matrix[c][s.eventType] || 0) + 1;
+      });
     });
     var totals = carers.map(function (c) {
       return Object.keys(matrix[c]).reduce(function (a, k) { return a + matrix[c][k]; }, 0);
