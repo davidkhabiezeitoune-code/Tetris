@@ -3,10 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Painterly Meadow</title>
+<title>Painterly Meadow — 3D</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #1a2214; }
-  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 58%, rgba(0,0,0,0) 35%, rgba(18,12,6,0.38) 100%);
+  }
+  #grain {
+    position: fixed; inset: 0; pointer-events: none;
+    opacity: 0.4; mix-blend-mode: overlay;
+  }
   #hint {
     position: fixed; left: 18px; bottom: 14px;
     font: 13px/1.4 Georgia, 'Times New Roman', serif;
@@ -14,7 +23,6 @@
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     pointer-events: none;
     transition: opacity 1.2s ease;
-    letter-spacing: 0.3px;
   }
   #title {
     position: fixed; left: 18px; top: 14px;
@@ -23,481 +31,718 @@
     text-shadow: 0 1px 4px rgba(0,0,0,0.55);
     pointer-events: none;
   }
+  #fallback {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    color: #eee; font: 16px Georgia, serif; text-align: center; padding: 20px;
+    background: #1a2214;
+  }
 </style>
 </head>
 <body>
-<canvas id="scene"></canvas>
+<canvas id="gl"></canvas>
+<div id="vignette"></div>
+<canvas id="grain"></canvas>
 <div id="title">Painterly Meadow</div>
-<div id="hint">move the cursor to stir the wind</div>
+<div id="hint">drag to look around &middot; scroll to zoom &middot; right-drag (or two fingers) to pan</div>
+<div id="fallback">Your browser doesn't support WebGL2, so this 3D scene can't render here.</div>
 <script>
 'use strict';
 
-// ─────────────────────────────────────────────────────────
-//  PERLIN-STYLE GRADIENT NOISE (2D)
-// ─────────────────────────────────────────────────────────
-const PERM = (() => {
-  const p = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) p[i] = i;
-  let seed = 1337;
-  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
-  for (let i = 255; i > 0; i--) {
-    const j = (rnd() * (i + 1)) | 0;
-    [p[i], p[j]] = [p[j], p[i]];
-  }
-  const full = new Uint8Array(512);
-  for (let i = 0; i < 512; i++) full[i] = p[i & 255];
-  return full;
-})();
-
-const GRAD = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
-function fade(t) { return t*t*t*(t*(t*6-15)+10); }
-function lerp(a,b,t) { return a + t*(b-a); }
-
-function perlin2(x, y) {
-  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-  const xf = x - Math.floor(x), yf = y - Math.floor(y);
-  const u = fade(xf), v = fade(yf);
-  const g = (ix, iy) => GRAD[PERM[(PERM[ix & 255] + iy) & 255] & 7];
-  const dot = (gv, dx, dy) => gv[0]*dx + gv[1]*dy;
-  const n00 = dot(g(X, Y),     xf,   yf);
-  const n10 = dot(g(X+1, Y),   xf-1, yf);
-  const n01 = dot(g(X, Y+1),   xf,   yf-1);
-  const n11 = dot(g(X+1, Y+1), xf-1, yf-1);
-  return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
+if (!gl) {
+  document.getElementById('fallback').style.display = 'flex';
+  throw new Error('WebGL2 unavailable');
 }
 
 // ─────────────────────────────────────────────────────────
-//  CANVAS SETUP
+//  MATH HELPERS
 // ─────────────────────────────────────────────────────────
-const canvas = document.getElementById('scene');
-const ctx = canvas.getContext('2d');
-const skyCvs = document.createElement('canvas');
-const skyCtx = skyCvs.getContext('2d');
-const grainCvs = document.createElement('canvas');
-const grainCtx = grainCvs.getContext('2d');
+function mat4Perspective(fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2);
+  const out = new Float32Array(16);
+  out[0] = f / aspect; out[5] = f;
+  out[10] = (far + near) / (near - far); out[11] = -1;
+  out[14] = (2 * far * near) / (near - far);
+  return out;
+}
 
-let W = 0, H = 0, DPR = 1;
-let horizonY = 0;
+function v3sub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function v3cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function v3norm(a) { const l = Math.hypot(a[0],a[1],a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; }
+function v3dot(a, b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 
-const LAYERS = [
-  { name: 'back',  bandTop: 0.60, bandBot: 0.68, heightMin: 10, heightMax: 24, widthBase: 1.8, sat: 40, light: 33, alpha: 0.78, reactivity: 0.55, densityFactor: 0.55 },
-  { name: 'mid',   bandTop: 0.66, bandBot: 0.84, heightMin: 20, heightMax: 42, widthBase: 2.8, sat: 47, light: 29, alpha: 0.90, reactivity: 0.80, densityFactor: 0.50 },
-  { name: 'front', bandTop: 0.80, bandBot: 1.02, heightMin: 34, heightMax: 78, widthBase: 4.2, sat: 51, light: 25, alpha: 1.00, reactivity: 1.15, densityFactor: 0.40 },
-];
+function mat4LookAt(eye, center, up) {
+  const z = v3norm(v3sub(eye, center));
+  const x = v3norm(v3cross(up, z));
+  const y = v3cross(z, x);
+  const out = new Float32Array(16);
+  out[0]=x[0]; out[1]=y[0]; out[2]=z[0]; out[3]=0;
+  out[4]=x[1]; out[5]=y[1]; out[6]=z[1]; out[7]=0;
+  out[8]=x[2]; out[9]=y[2]; out[10]=z[2]; out[11]=0;
+  out[12] = -v3dot(x, eye); out[13] = -v3dot(y, eye); out[14] = -v3dot(z, eye); out[15] = 1;
+  return out;
+}
 
-let blades = null;   // typed-array bundle per layer
-let flowers = [];
-let seeds = [];
+// ─────────────────────────────────────────────────────────
+//  CPU NOISE (heightmap + placement)
+// ─────────────────────────────────────────────────────────
+function hash2(x, y) {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+function valueNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const h00 = hash2(xi, yi), h10 = hash2(xi+1, yi), h01 = hash2(xi, yi+1), h11 = hash2(xi+1, yi+1);
+  const u = xf*xf*(3-2*xf), v = yf*yf*(3-2*yf);
+  const a = h00 + (h10-h00)*u, b = h01 + (h11-h01)*u;
+  return a + (b-a)*v;
+}
+function fbm(x, y, octaves) {
+  let total = 0, amp = 0.5, freq = 1, sum = 0;
+  for (let i = 0; i < octaves; i++) {
+    total += valueNoise(x*freq, y*freq) * amp;
+    sum += amp; amp *= 0.5; freq *= 2;
+  }
+  return total / sum;
+}
+function heightAt(x, z) {
+  return (fbm(x*0.010, z*0.010, 4) - 0.5) * 15 + (fbm(x*0.06+50, z*0.06+50, 3) - 0.5) * 2.2;
+}
 
+// ─────────────────────────────────────────────────────────
+//  SHADERS
+// ─────────────────────────────────────────────────────────
+const SKY_VS = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() { vUv = aPos; gl_Position = vec4(aPos, 0.9999, 1.0); }
+`;
+
+const SKY_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform vec3 uCamForward, uCamRight, uCamUp;
+uniform float uAspect, uTanFov;
+uniform vec3 uSunDir;
+uniform float uTime;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+float fbm(vec2 p) {
+  float t = 0.0, amp = 0.5;
+  for (int i = 0; i < 5; i++) { t += noise(p) * amp; p *= 2.02; amp *= 0.5; }
+  return t;
+}
+
+void main() {
+  vec3 dir = normalize(uCamForward + uCamRight * (vUv.x * uAspect * uTanFov) + uCamUp * (vUv.y * uTanFov));
+  float h = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+
+  vec3 low  = vec3(0.85, 0.60, 0.53);
+  vec3 mid  = vec3(0.97, 0.73, 0.55);
+  vec3 high = vec3(0.97, 0.87, 0.66);
+  vec3 sky = mix(low, mid, smoothstep(0.0, 0.45, h));
+  sky = mix(sky, high, smoothstep(0.45, 1.0, h));
+
+  float sun = max(dot(dir, uSunDir), 0.0);
+  sky += vec3(1.0, 0.92, 0.75) * pow(sun, 340.0) * 3.0;
+  sky += vec3(1.0, 0.85, 0.6) * pow(sun, 12.0) * 0.55;
+
+  if (dir.y > -0.02) {
+    vec2 cp = dir.xz / (dir.y + 0.35) * 0.6 + uTime * 0.006;
+    float clouds = fbm(cp * 1.3);
+    float mask = smoothstep(0.55, 0.85, clouds) * smoothstep(-0.02, 0.25, dir.y);
+    sky = mix(sky, vec3(1.0, 0.97, 0.92), mask * 0.55);
+  }
+
+  outColor = vec4(sky, 1.0);
+}
+`;
+
+const NOISE_GLSL = `
+float hashG(vec2 p) { return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+float noiseG(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  float a = hashG(i), b = hashG(i+vec2(1.0,0.0)), c = hashG(i+vec2(0.0,1.0)), d = hashG(i+vec2(1.0,1.0));
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+vec2 windAt(vec2 p, float t) {
+  float n1 = noiseG(p * 0.05 + vec2(t * 0.35, 0.0)) - 0.5;
+  float n2 = noiseG(p * 0.15 + vec2(0.0, t * 0.6) + 30.0) - 0.5;
+  float gust = sin(p.x * 0.06 + p.y * 0.03 - t * 1.6) * 0.5 + 0.35;
+  float mag = (n1 * 0.6 + n2 * 0.4) + gust * 0.5;
+  vec2 dir = normalize(vec2(0.8, 0.35));
+  return dir * mag;
+}
+`;
+
+const TERRAIN_VS = `#version 300 es
+in vec3 aPos;
+in vec3 aNormal;
+in vec3 aColor;
+out vec3 vColor;
+out vec3 vNormal;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamPos;
+void main() {
+  vColor = aColor;
+  vNormal = aNormal;
+  vDist = distance(aPos, uCamPos);
+  gl_Position = uProj * uView * vec4(aPos, 1.0);
+}
+`;
+
+const TERRAIN_FS = `#version 300 es
+precision highp float;
+in vec3 vColor;
+in vec3 vNormal;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uSunDir;
+uniform vec3 uFogColor;
+void main() {
+  float diffuse = max(dot(normalize(vNormal), uSunDir), 0.0);
+  float banded = floor(diffuse * 3.0) / 3.0;
+  float lightF = mix(diffuse, banded, 0.5) * 0.65 + 0.42;
+  vec3 col = vColor * lightF;
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+const GRASS_VS = `#version 300 es
+in vec3 aLocal;
+in vec3 aInstPos;
+in vec4 aInstData; // scale, rotation, colorT, phase
+out float vHeightFrac;
+out float vColorT;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamPos;
+uniform float uTime;
+${NOISE_GLSL}
+void main() {
+  float heightFrac = aLocal.y;
+  float width = aInstData.x * 0.075;
+  float height = aInstData.x * 0.62;
+  vec3 local = vec3(aLocal.x * width, aLocal.y * height, aLocal.z * width);
+  float ca = cos(aInstData.y), sa = sin(aInstData.y);
+  vec3 rotated = vec3(local.x*ca - local.z*sa, local.y, local.x*sa + local.z*ca);
+  vec3 worldPos = aInstPos + rotated;
+
+  float w = heightFrac * heightFrac;
+  vec2 wind = windAt(aInstPos.xz + aInstData.w * 4.0, uTime);
+  worldPos.x += wind.x * w * height * 1.4;
+  worldPos.z += wind.y * w * height * 1.4;
+  worldPos.y -= dot(wind, wind) * w * height * 0.5;
+
+  vHeightFrac = heightFrac;
+  vColorT = aInstData.z;
+  vDist = distance(worldPos, uCamPos);
+  gl_Position = uProj * uView * vec4(worldPos, 1.0);
+}
+`;
+
+const GRASS_FS = `#version 300 es
+precision highp float;
+in float vHeightFrac;
+in float vColorT;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uFogColor;
+void main() {
+  vec3 dark  = mix(vec3(0.08,0.16,0.05), vec3(0.11,0.22,0.07), vColorT);
+  vec3 light = mix(vec3(0.35,0.42,0.14), vec3(0.55,0.55,0.20), vColorT);
+  vec3 col = mix(dark, light, smoothstep(0.0, 1.0, vHeightFrac));
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+const FLOWER_VS = `#version 300 es
+in vec2 aLocal;
+in vec3 aInstPos;
+in vec4 aInstData; // size, hue-select, sway phase, unused
+out vec3 vColor;
+out vec2 vLocal;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamRight, uCamUp, uCamPos;
+uniform float uTime;
+void main() {
+  float sway = sin(uTime * 1.4 + aInstData.z) * 0.05;
+  vec3 worldPos = aInstPos
+    + uCamRight * (aLocal.x * aInstData.x)
+    + uCamUp * (aLocal.y * aInstData.x)
+    + vec3(sway, 0.0, sway);
+  vColor = aInstData.y > 0.5 ? vec3(0.95, 0.78, 0.25) : vec3(0.85, 0.30, 0.28);
+  vLocal = aLocal;
+  vDist = distance(worldPos, uCamPos);
+  gl_Position = uProj * uView * vec4(worldPos, 1.0);
+}
+`;
+
+const FLOWER_FS = `#version 300 es
+precision highp float;
+in vec3 vColor;
+in vec2 vLocal;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uFogColor;
+void main() {
+  float d = length(vLocal);
+  if (d > 1.0) discard;
+  vec3 center = mix(vColor, vec3(0.98, 0.85, 0.35), smoothstep(0.55, 0.0, d));
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  vec3 col = mix(center, uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(s) + '\n' + src);
+  }
+  return s;
+}
+function createProgram(vsSrc, fsSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    throw new Error(gl.getProgramInfoLog(p));
+  }
+  return p;
+}
+function locs(program, uniforms, attribs) {
+  const u = {}, a = {};
+  for (const n of uniforms) u[n] = gl.getUniformLocation(program, n);
+  for (const n of attribs) a[n] = gl.getAttribLocation(program, n);
+  return { program, u, a };
+}
+
+const skyProg = locs(createProgram(SKY_VS, SKY_FS),
+  ['uCamForward','uCamRight','uCamUp','uAspect','uTanFov','uSunDir','uTime'], ['aPos']);
+const terrainProg = locs(createProgram(TERRAIN_VS, TERRAIN_FS),
+  ['uProj','uView','uCamPos','uSunDir','uFogColor'], ['aPos','aNormal','aColor']);
+const grassProg = locs(createProgram(GRASS_VS, GRASS_FS),
+  ['uProj','uView','uCamPos','uTime','uFogColor'], ['aLocal','aInstPos','aInstData']);
+const flowerProg = locs(createProgram(FLOWER_VS, FLOWER_FS),
+  ['uProj','uView','uCamPos','uCamRight','uCamUp','uTime','uFogColor'], ['aLocal','aInstPos','aInstData']);
+
+// ─────────────────────────────────────────────────────────
+//  SKY QUAD
+// ─────────────────────────────────────────────────────────
+const skyVao = gl.createVertexArray();
+gl.bindVertexArray(skyVao);
+const skyBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(skyProg.a.aPos);
+gl.vertexAttribPointer(skyProg.a.aPos, 2, gl.FLOAT, false, 0, 0);
+
+// ─────────────────────────────────────────────────────────
+//  TERRAIN MESH
+// ─────────────────────────────────────────────────────────
+const WORLD_HALF = 150;
+const GRID_N = 120;
 function rand(a, b) { return a + Math.random() * (b - a); }
 
-const BUCKETS_PER_LAYER = 18;
+let terrainVao, terrainIndexCount;
+{
+  const verts = (GRID_N + 1) * (GRID_N + 1);
+  const positions = new Float32Array(verts * 3);
+  const normals = new Float32Array(verts * 3);
+  const colors = new Float32Array(verts * 3);
+  const eps = 0.75;
 
-function buildField() {
-  blades = LAYERS.map(layer => {
-    const bandTop = H * layer.bandTop, bandBot = H * layer.bandBot;
-    const count = Math.max(150, Math.min(1400, Math.round(W * layer.densityFactor)));
-    const x        = new Float32Array(count);
-    const baseY    = new Float32Array(count);
-    const height   = new Float32Array(count);
-    const width    = new Float32Array(count);
-    const angle    = new Float32Array(count);
-    const angVel   = new Float32Array(count);
-    const stiff    = new Float32Array(count);
-    const damp     = new Float32Array(count);
-    const drive    = new Float32Array(count);
-    const curl     = new Float32Array(count);
-    const bucket   = new Int32Array(count);
+  let vi = 0;
+  for (let iz = 0; iz <= GRID_N; iz++) {
+    for (let ix = 0; ix <= GRID_N; ix++) {
+      const x = -WORLD_HALF + (ix / GRID_N) * WORLD_HALF * 2;
+      const z = -WORLD_HALF + (iz / GRID_N) * WORLD_HALF * 2;
+      const h = heightAt(x, z);
+      positions[vi*3] = x; positions[vi*3+1] = h; positions[vi*3+2] = z;
 
-    const bucketStyles = new Array(BUCKETS_PER_LAYER);
-    for (let b = 0; b < BUCKETS_PER_LAYER; b++) {
-      const bt = b / (BUCKETS_PER_LAYER - 1);
-      const hue   = lerp(76, 110, bt) + rand(-3, 3);
-      const light = layer.light + rand(-6, 9);
-      bucketStyles[b] = `hsl(${hue.toFixed(1)}, ${layer.sat}%, ${light.toFixed(1)}%)`;
+      const hL = heightAt(x-eps, z), hR = heightAt(x+eps, z);
+      const hD = heightAt(x, z-eps), hU = heightAt(x, z+eps);
+      const dx = (hR-hL)/(2*eps), dz = (hU-hD)/(2*eps);
+      const n = v3norm([-dx, 1, -dz]);
+      normals[vi*3] = n[0]; normals[vi*3+1] = n[1]; normals[vi*3+2] = n[2];
+
+      const t = Math.max(0, Math.min(1, (h + 8) / 16));
+      const jitter = rand(-0.025, 0.025);
+      const low = [0.11, 0.20, 0.075], high = [0.56, 0.50, 0.27];
+      colors[vi*3]   = low[0] + (high[0]-low[0]) * t + jitter;
+      colors[vi*3+1] = low[1] + (high[1]-low[1]) * t + jitter;
+      colors[vi*3+2] = low[2] + (high[2]-low[2]) * t + jitter * 0.5;
+      vi++;
     }
+  }
 
-    for (let i = 0; i < count; i++) {
-      const t = Math.random();               // 0 = far edge of band, 1 = near edge
-      x[i]      = Math.random() * W;
-      baseY[i]  = lerp(bandTop, bandBot, t);
-      height[i] = lerp(layer.heightMin, layer.heightMax, t) * rand(0.85, 1.2);
-      width[i]  = layer.widthBase * lerp(0.7, 1.3, t) * rand(0.85, 1.15);
-      bucket[i] = (Math.random() * BUCKETS_PER_LAYER) | 0;
-      angle[i]  = rand(-0.08, 0.08);
-      angVel[i] = 0;
-      stiff[i]  = rand(28, 42);
-      damp[i]   = rand(6.5, 9.5);
-      drive[i]  = rand(7, 11) * layer.reactivity;
-      curl[i]   = rand(0.9, 1.5);
+  const idx = [];
+  for (let iz = 0; iz < GRID_N; iz++) {
+    for (let ix = 0; ix < GRID_N; ix++) {
+      const a = iz*(GRID_N+1)+ix, b = a+1, c = a+(GRID_N+1), d = c+1;
+      idx.push(a,c,b, b,c,d);
     }
-    // sort by colour bucket (for batched fills), then back-to-front within a bucket
-    const order = Array.from({ length: count }, (_, i) => i)
-      .sort((a, b) => bucket[a] - bucket[b] || baseY[a] - baseY[b]);
-    const reorder = arr => { const c = arr.slice(); order.forEach((srcI, dstI) => arr[dstI] = c[srcI]); };
-    [x, baseY, height, width, angle, angVel, stiff, damp, drive, curl, bucket].forEach(reorder);
-
-    const bucketRanges = new Array(BUCKETS_PER_LAYER);
-    let cursor = 0;
-    for (let b = 0; b < BUCKETS_PER_LAYER; b++) {
-      const start = cursor;
-      while (cursor < count && bucket[cursor] === b) cursor++;
-      bucketRanges[b] = [start, cursor];
-    }
-
-    return { count, x, baseY, height, width, angle, angVel, stiff, damp, drive, curl, bucketRanges, bucketStyles, alpha: layer.alpha };
-  });
-
-  flowers = [];
-  const flowerCount = Math.round(W * 0.035);
-  const frontLayer = LAYERS[LAYERS.length - 1];
-  for (let i = 0; i < flowerCount; i++) {
-    flowers.push({
-      x: Math.random() * W,
-      y: rand(H * frontLayer.bandTop + 20, H * frontLayer.bandBot - 6),
-      size: rand(2.2, 4.2),
-      hue: Math.random() < 0.5 ? rand(45, 55) : rand(0, 10),
-      phase: Math.random() * Math.PI * 2,
-    });
   }
+  const indices = new Uint32Array(idx);
+  terrainIndexCount = indices.length;
 
-  seeds = [];
-  const seedCount = 26;
-  for (let i = 0; i < seedCount; i++) {
-    seeds.push({
-      x: Math.random() * W,
-      y: rand(H * 0.2, H * 0.85),
-      vy: rand(-4, -10),
-      phase: Math.random() * Math.PI * 2,
-      size: rand(1.4, 2.6),
-    });
-  }
+  terrainVao = gl.createVertexArray();
+  gl.bindVertexArray(terrainVao);
+
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(terrainProg.a.aPos);
+  gl.vertexAttribPointer(terrainProg.a.aPos, 3, gl.FLOAT, false, 0, 0);
+
+  const normBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(terrainProg.a.aNormal);
+  gl.vertexAttribPointer(terrainProg.a.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+  const colBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(terrainProg.a.aColor);
+  gl.vertexAttribPointer(terrainProg.a.aColor, 3, gl.FLOAT, false, 0, 0);
+
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 }
 
-function paintCloudBlob(c, x, y, r, hueBase, alpha) {
-  const dabs = 10;
-  for (let i = 0; i < dabs; i++) {
-    const a = (i / dabs) * Math.PI * 2;
-    const rr = r * rand(0.4, 1.0);
-    const dx = x + Math.cos(a) * r * rand(0.2, 0.9);
-    const dy = y + Math.sin(a) * r * rand(0.15, 0.55);
-    const g = c.createRadialGradient(dx, dy, 0, dx, dy, rr);
-    g.addColorStop(0, `hsla(${hueBase}, 40%, 96%, ${alpha})`);
-    g.addColorStop(1, `hsla(${hueBase}, 40%, 96%, 0)`);
-    c.fillStyle = g;
-    c.beginPath();
-    c.arc(dx, dy, rr, 0, Math.PI * 2);
-    c.fill();
-  }
+// ─────────────────────────────────────────────────────────
+//  GRASS (instanced crossed blades)
+// ─────────────────────────────────────────────────────────
+const GRASS_RADIUS = 95;
+const GRASS_COUNT = 30000;
+function smoothstepJS(e0, e1, x) {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
 }
 
-function stippleHill(c, baseY, amp, freq, hue, sat, light, count, seedOffset, fillBottom) {
-  c.beginPath();
-  c.moveTo(0, fillBottom);
-  const pts = 40;
-  const top = [];
-  for (let i = 0; i <= pts; i++) {
-    const px = (i / pts) * W;
-    const py = baseY - Math.sin(i * freq + seedOffset) * amp - perlin2(i * 0.3 + seedOffset, seedOffset) * amp * 0.6;
-    top.push(py);
-    c.lineTo(px, py);
-  }
-  c.lineTo(W, fillBottom);
-  c.closePath();
-  const grad = c.createLinearGradient(0, baseY - amp * 2, 0, fillBottom);
-  grad.addColorStop(0, `hsl(${hue}, ${sat}%, ${light}%)`);
-  grad.addColorStop(1, `hsl(${hue}, ${sat - 8}%, ${light - 10}%)`);
-  c.fillStyle = grad;
-  c.fill();
+let grassVao, grassCount;
+{
+  // local blade-cross geometry: two perpendicular tapered planes
+  const local = new Float32Array([
+    -1,0,0,   1,0,0,   -0.55,0.45,0,   0.55,0.45,0,   0,1,0,
+     0,0,-1,  0,0,1,   0,0.45,-0.55,   0,0.45,0.55,   0,1,0,
+  ]);
+  const localIdx = new Uint16Array([0,2,1, 1,2,3, 2,4,3,  5,7,6, 6,7,8, 7,9,8]);
 
-  // painterly stippled texture over the hill
-  c.save();
-  c.clip();
-  for (let i = 0; i < count; i++) {
-    const px = Math.random() * W;
-    const py = rand(baseY - amp * 1.5, fillBottom);
-    const r = rand(3, 9);
-    c.fillStyle = `hsla(${hue + rand(-8,8)}, ${sat}%, ${light + rand(-8, 10)}%, ${rand(0.08, 0.22)})`;
-    c.beginPath();
-    c.ellipse(px, py, r, r * 0.6, rand(0, Math.PI), 0, Math.PI * 2);
-    c.fill();
+  const count = GRASS_COUNT;
+  const instPos = new Float32Array(count * 3);
+  const instData = new Float32Array(count * 4);
+  let n = 0;
+  while (n < count) {
+    const r = Math.sqrt(Math.random()) * GRASS_RADIUS;
+    const a = Math.random() * Math.PI * 2;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    // long, gradual taper — thins out over most of the radius rather than a hard ring
+    const edgeFade = 1 - smoothstepJS(GRASS_RADIUS * 0.3, GRASS_RADIUS, r);
+    if (Math.random() > edgeFade) continue;
+    instPos[n*3] = x; instPos[n*3+1] = heightAt(x, z); instPos[n*3+2] = z;
+    instData[n*4]   = rand(0.55, 1.15) * (0.35 + 0.65*edgeFade); // scale
+    instData[n*4+1] = Math.random() * Math.PI * 2;             // rotation
+    instData[n*4+2] = Math.random();                            // colorT
+    instData[n*4+3] = Math.random() * 100;                      // phase
+    n++;
   }
-  c.restore();
+  grassCount = n;
+
+  grassVao = gl.createVertexArray();
+  gl.bindVertexArray(grassVao);
+
+  const localBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, localBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, local, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(grassProg.a.aLocal);
+  gl.vertexAttribPointer(grassProg.a.aLocal, 3, gl.FLOAT, false, 0, 0);
+
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instPos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(grassProg.a.aInstPos);
+  gl.vertexAttribPointer(grassProg.a.aInstPos, 3, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(grassProg.a.aInstPos, 1);
+
+  const dataBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, dataBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instData, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(grassProg.a.aInstData);
+  gl.vertexAttribPointer(grassProg.a.aInstData, 4, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(grassProg.a.aInstData, 1);
+
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, localIdx, gl.STATIC_DRAW);
 }
 
-function paintSky() {
-  skyCvs.width = W; skyCvs.height = H;
-  const c = skyCtx;
+// ─────────────────────────────────────────────────────────
+//  FLOWERS (instanced camera-facing billboards)
+// ─────────────────────────────────────────────────────────
+const FLOWER_COUNT = 700;
+let flowerVao;
+{
+  const localQuad = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+  const quadIdx = new Uint16Array([0,1,2, 1,3,2]);
 
-  const sky = c.createLinearGradient(0, 0, 0, horizonY * 1.1);
-  sky.addColorStop(0,   '#fbe6a8');
-  sky.addColorStop(0.35,'#f8d497');
-  sky.addColorStop(0.62,'#f2b98f');
-  sky.addColorStop(0.85,'#e9a98f');
-  sky.addColorStop(1,   '#d9a08c');
-  c.fillStyle = sky;
-  c.fillRect(0, 0, W, horizonY * 1.15);
-
-  // sun glow
-  const sunX = W * 0.74, sunY = H * 0.26;
-  const glow = c.createRadialGradient(sunX, sunY, 0, sunX, sunY, W * 0.42);
-  glow.addColorStop(0, 'rgba(255,250,220,0.9)');
-  glow.addColorStop(0.15, 'rgba(255,240,190,0.55)');
-  glow.addColorStop(1, 'rgba(255,240,190,0)');
-  c.fillStyle = glow;
-  c.fillRect(0, 0, W, horizonY * 1.15);
-  c.beginPath();
-  c.fillStyle = 'rgba(255,253,235,0.95)';
-  c.arc(sunX, sunY, Math.max(18, W * 0.028), 0, Math.PI * 2);
-  c.fill();
-
-  // painterly clouds
-  for (let i = 0; i < 6; i++) {
-    paintCloudBlob(c, rand(0, W), rand(H * 0.06, H * 0.32), rand(W * 0.05, W * 0.11), 40, rand(0.10, 0.22));
+  const instPos = new Float32Array(FLOWER_COUNT * 3);
+  const instData = new Float32Array(FLOWER_COUNT * 4);
+  for (let i = 0; i < FLOWER_COUNT; i++) {
+    const r = Math.sqrt(Math.random()) * GRASS_RADIUS * 0.85;
+    const a = Math.random() * Math.PI * 2;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    instPos[i*3] = x; instPos[i*3+1] = heightAt(x, z) + 0.12; instPos[i*3+2] = z;
+    instData[i*4]   = rand(0.05, 0.09);
+    instData[i*4+1] = Math.random() < 0.5 ? 1 : 0;
+    instData[i*4+2] = Math.random() * 100;
+    instData[i*4+3] = 0;
   }
 
-  // canvas-texture brush dabs across the whole sky for a painted feel
-  for (let i = 0; i < W * 0.25; i++) {
-    const px = Math.random() * W, py = Math.random() * horizonY * 1.1;
-    c.fillStyle = `hsla(${rand(28, 46)}, 60%, ${rand(70, 92)}%, ${rand(0.02, 0.06)})`;
-    c.beginPath();
-    c.ellipse(px, py, rand(4, 14), rand(2, 6), rand(0, Math.PI), 0, Math.PI * 2);
-    c.fill();
-  }
+  flowerVao = gl.createVertexArray();
+  gl.bindVertexArray(flowerVao);
 
-  // distant + mid hills, painterly stippled — only reach a short way past the horizon
-  stippleHill(c, horizonY * 0.86, 22, 0.35, 96, 30, 46, W * 0.10, 12.5, horizonY * 1.02);
-  stippleHill(c, horizonY * 0.97, 30, 0.28, 100, 34, 38, W * 0.14, 47.1, horizonY * 1.20);
+  const localBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, localBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, localQuad, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(flowerProg.a.aLocal);
+  gl.vertexAttribPointer(flowerProg.a.aLocal, 2, gl.FLOAT, false, 0, 0);
 
-  // ground base: seamless field colour the grass blades sit on top of
-  const groundTop = horizonY * 0.99;
-  const ground = c.createLinearGradient(0, groundTop, 0, H);
-  ground.addColorStop(0,   'hsl(98, 34%, 34%)');
-  ground.addColorStop(0.4, 'hsl(96, 40%, 24%)');
-  ground.addColorStop(1,   'hsl(92, 42%, 15%)');
-  c.fillStyle = ground;
-  c.fillRect(0, groundTop, W, H - groundTop);
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instPos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(flowerProg.a.aInstPos);
+  gl.vertexAttribPointer(flowerProg.a.aInstPos, 3, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(flowerProg.a.aInstPos, 1);
+
+  const dataBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, dataBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instData, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(flowerProg.a.aInstData);
+  gl.vertexAttribPointer(flowerProg.a.aInstData, 4, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(flowerProg.a.aInstData, 1);
+
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, quadIdx, gl.STATIC_DRAW);
 }
 
-function buildGrain() {
-  grainCvs.width = 160; grainCvs.height = 160;
-  const c = grainCtx;
-  const img = c.createImageData(160, 160);
+// ─────────────────────────────────────────────────────────
+//  GRAIN OVERLAY (2D canvas, CSS-composited over the WebGL canvas)
+// ─────────────────────────────────────────────────────────
+{
+  const gc = document.getElementById('grain');
+  gc.width = 160; gc.height = 160;
+  const gctx = gc.getContext('2d');
+  const img = gctx.createImageData(160, 160);
   for (let i = 0; i < img.data.length; i += 4) {
     const v = 255 * Math.random();
     img.data[i] = img.data[i+1] = img.data[i+2] = v;
-    img.data[i+3] = 18;
+    img.data[i+3] = 22;
   }
-  c.putImageData(img, 0, 0);
+  gctx.putImageData(img, 0, 0);
+  gc.style.backgroundImage = `url(${gc.toDataURL()})`;
+  gc.style.backgroundRepeat = 'repeat';
+  gc.style.imageRendering = 'pixelated';
 }
 
+// ─────────────────────────────────────────────────────────
+//  CAMERA (orbit / pan / zoom)
+// ─────────────────────────────────────────────────────────
+const SUN_DIR = v3norm([0.55, 0.55, 0.35]);
+const FOG_COLOR = [0.93, 0.72, 0.58];
+
+let camTheta = 0.7, camPhi = 1.05, camRadius = 42;
+let camTarget = [0, 2, 0];
+
+function cameraVectors() {
+  const eye = [
+    camTarget[0] + camRadius * Math.sin(camPhi) * Math.sin(camTheta),
+    camTarget[1] + camRadius * Math.cos(camPhi),
+    camTarget[2] + camRadius * Math.sin(camPhi) * Math.cos(camTheta),
+  ];
+  const forward = v3norm(v3sub(camTarget, eye));
+  const worldUp = [0, 1, 0];
+  const right = v3norm(v3cross(forward, worldUp));
+  const up = v3cross(right, forward);
+  return { eye, forward, right, up };
+}
+
+let dragMode = null; // 'rotate' | 'pan'
+let lastX = 0, lastY = 0;
+let pinchDist = 0;
+
+function hideHint() { document.getElementById('hint').style.opacity = '0'; }
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+canvas.addEventListener('mousedown', e => {
+  dragMode = (e.button === 2 || e.shiftKey) ? 'pan' : 'rotate';
+  lastX = e.clientX; lastY = e.clientY;
+});
+window.addEventListener('mouseup', () => dragMode = null);
+window.addEventListener('mousemove', e => {
+  if (!dragMode) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  hideHint();
+  if (dragMode === 'rotate') {
+    camTheta -= dx * 0.0055;
+    camPhi = Math.max(0.15, Math.min(1.48, camPhi - dy * 0.0055));
+  } else {
+    const { right, up } = cameraVectors();
+    const k = camRadius * 0.0016;
+    camTarget[0] += (-right[0]*dx + up[0]*dy) * k;
+    camTarget[1] += (-right[1]*dx + up[1]*dy) * k;
+    camTarget[2] += (-right[2]*dx + up[2]*dy) * k;
+    camTarget[0] = Math.max(-130, Math.min(130, camTarget[0]));
+    camTarget[2] = Math.max(-130, Math.min(130, camTarget[2]));
+  }
+});
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  hideHint();
+  camRadius *= Math.pow(1.0015, e.deltaY);
+  camRadius = Math.max(4, Math.min(180, camRadius));
+}, { passive: false });
+
+function touchPoint(t) { return [t.clientX, t.clientY]; }
+canvas.addEventListener('touchstart', e => {
+  hideHint();
+  if (e.touches.length === 1) {
+    dragMode = 'rotate';
+    [lastX, lastY] = touchPoint(e.touches[0]);
+  } else if (e.touches.length === 2) {
+    dragMode = 'pinch';
+    const [x0,y0] = touchPoint(e.touches[0]), [x1,y1] = touchPoint(e.touches[1]);
+    pinchDist = Math.hypot(x1-x0, y1-y0);
+    lastX = (x0+x1)/2; lastY = (y0+y1)/2;
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (dragMode === 'rotate' && e.touches.length === 1) {
+    const [x, y] = touchPoint(e.touches[0]);
+    const dx = x - lastX, dy = y - lastY;
+    lastX = x; lastY = y;
+    camTheta -= dx * 0.006;
+    camPhi = Math.max(0.15, Math.min(1.48, camPhi - dy * 0.006));
+  } else if (dragMode === 'pinch' && e.touches.length === 2) {
+    const [x0,y0] = touchPoint(e.touches[0]), [x1,y1] = touchPoint(e.touches[1]);
+    const dist = Math.hypot(x1-x0, y1-y0);
+    camRadius *= pinchDist / Math.max(1, dist);
+    camRadius = Math.max(4, Math.min(180, camRadius));
+    pinchDist = dist;
+    const mx = (x0+x1)/2, my = (y0+y1)/2;
+    const dx = mx - lastX, dy = my - lastY;
+    lastX = mx; lastY = my;
+    const { right, up } = cameraVectors();
+    const k = camRadius * 0.0016;
+    camTarget[0] += (-right[0]*dx + up[0]*dy) * k;
+    camTarget[2] += (-right[2]*dx + up[2]*dy) * k;
+  }
+}, { passive: false });
+window.addEventListener('touchend', e => { if (e.touches.length === 0) dragMode = null; });
+
+// ─────────────────────────────────────────────────────────
+//  RESIZE
+// ─────────────────────────────────────────────────────────
+let W = 0, H = 0, DPR = 1;
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth;
-  H = window.innerHeight;
-  canvas.width = W * DPR;
-  canvas.height = H * DPR;
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  horizonY = H * 0.58;
-  buildField();
-  paintSky();
-  if (grainCvs.width) rebuildCachedStyles();
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  gl.viewport(0, 0, canvas.width, canvas.height);
 }
+window.addEventListener('resize', resize);
+resize();
 
 // ─────────────────────────────────────────────────────────
-//  WIND FIELD
+//  RENDER LOOP
 // ─────────────────────────────────────────────────────────
-let mouseX = -9999, mouseY = -9999, mouseVX = 0, lastMouseX = -9999, mouseActive = 0;
-
-function gustEnvelope(t) {
-  return 0.35 + 0.65 * (0.5 + 0.5 * perlin2(t * 0.045, 91.4));
-}
-
-function windAt(x, t, reactivity) {
-  const drift  = perlin2(x * 0.0009 + t * 0.06, t * 0.09) * 0.65;
-  const ripple = perlin2(x * 0.0045 + t * 0.35, 200 + t * 0.22) * 0.45;
-  const gustWave = Math.sin(x * 0.0016 - t * 1.15) * gustEnvelope(t);
-  let w = (drift + ripple) * 0.6 + gustWave * 0.55;
-
-  if (mouseActive > 0.01) {
-    const dx = x - mouseX;
-    const sigma = 120;
-    const falloff = Math.exp(-(dx * dx) / (2 * sigma * sigma));
-    w += falloff * mouseVX * 0.045 * mouseActive;
-  }
-  return w * reactivity;
-}
-
-// ─────────────────────────────────────────────────────────
-//  SIMULATION + RENDER
-// ─────────────────────────────────────────────────────────
-const MAX_ANGLE = 1.05;
-let simTime = 0;
-let lastFrame = performance.now();
-
-function stepBlades(layerData, layerIdx, dt) {
-  const { count, x, angle, angVel, stiff, damp, drive } = layerData;
-  const layer = LAYERS[layerIdx];
-  for (let i = 0; i < count; i++) {
-    const w = windAt(x[i], simTime, layer.reactivity);
-    const a = angle[i];
-    const accel = w * drive[i] - stiff[i] * a - damp[i] * angVel[i];
-    angVel[i] += accel * dt;
-    let na = a + angVel[i] * dt;
-    if (na > MAX_ANGLE) { na = MAX_ANGLE; angVel[i] *= -0.3; }
-    if (na < -MAX_ANGLE) { na = -MAX_ANGLE; angVel[i] *= -0.3; }
-    angle[i] = na;
-  }
-}
-
-// A slightly-kinked tapered polygon — cheaper to rasterize than a bezier blade
-// while still reading as a bent grass leaf at typical on-screen sizes.
-function traceBlade(baseX, baseY, height, halfWidth, angle, curl) {
-  const lean = Math.sin(angle), up = Math.cos(angle);
-  const tipX = baseX + height * lean * curl;
-  const tipY = baseY - height * up;
-  const midX = baseX + height * 0.5 * lean * 1.35;
-  const midY = baseY - height * 0.5 * up;
-  const px = up, py = lean; // perpendicular to the blade's up direction
-  const hw2 = halfWidth * 0.35;
-
-  ctx.moveTo(baseX - px * halfWidth, baseY - py * halfWidth);
-  ctx.lineTo(midX - px * hw2, midY - py * hw2);
-  ctx.lineTo(tipX, tipY);
-  ctx.lineTo(midX + px * hw2, midY + py * hw2);
-  ctx.lineTo(baseX + px * halfWidth, baseY + py * halfWidth);
-}
-
-function renderLayer(layerData, layerIdx) {
-  const { x, baseY, height, width, angle, curl, bucketRanges, bucketStyles, alpha } = layerData;
-
-  ctx.globalAlpha = alpha;
-  for (let b = 0; b < bucketRanges.length; b++) {
-    const [start, end] = bucketRanges[b];
-    if (start === end) continue;
-    ctx.beginPath();
-    for (let i = start; i < end; i++) {
-      traceBlade(x[i], baseY[i], height[i], width[i] * 0.5, angle[i], curl[i]);
-    }
-    ctx.fillStyle = bucketStyles[b];
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  if (layerIdx === LAYERS.length - 1) {
-    for (const f of flowers) {
-      const sway = Math.sin(simTime * 1.4 + f.phase) * 3;
-      ctx.beginPath();
-      ctx.fillStyle = `hsla(${f.hue}, 70%, 62%, 0.9)`;
-      ctx.arc(f.x + sway, f.y, f.size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-}
-
-function renderWindShadow() {
-  const stops = 24;
-  const top = horizonY * 0.95;
-  const g = ctx.createLinearGradient(0, 0, W, 0);
-  for (let i = 0; i <= stops; i++) {
-    const x0 = (i / stops) * W;
-    const sample = windAt(x0, simTime, 1);
-    const shade = 0.5 - sample * 0.16;
-    g.addColorStop(i / stops, `hsla(90, 30%, ${Math.round(shade * 100)}%, 0.14)`);
-  }
-  ctx.save();
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.fillStyle = g;
-  ctx.fillRect(0, top, W, H - top);
-  ctx.restore();
-}
-
-function renderSeeds(dt) {
-  ctx.globalAlpha = 0.85;
-  for (const s of seeds) {
-    const w = windAt(s.x, simTime, 1.4);
-    s.x += (w * 26 + 6) * dt;
-    s.y += (s.vy + Math.sin(simTime * 2 + s.phase) * 6) * dt;
-    if (s.x > W + 10) s.x = -10;
-    if (s.x < -10) s.x = W + 10;
-    if (s.y < -10) { s.y = H * 0.9; s.x = Math.random() * W; }
-    ctx.fillStyle = 'rgba(255,255,250,0.8)';
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
-
-let vignetteStyle = null;
-let grainPattern = null;
-
-function rebuildCachedStyles() {
-  const vg = ctx.createRadialGradient(W/2, H*0.55, H*0.25, W/2, H*0.55, H*0.85);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(20,14,6,0.32)');
-  vignetteStyle = vg;
-  grainPattern = ctx.createPattern(grainCvs, 'repeat');
-}
+gl.enable(gl.DEPTH_TEST);
+gl.clearColor(FOG_COLOR[0], FOG_COLOR[1], FOG_COLOR[2], 1);
 
 function frame(now) {
-  let dt = (now - lastFrame) / 1000;
-  lastFrame = now;
-  if (dt > 0.05) dt = 0.05;
-  simTime += dt;
+  const time = now * 0.001;
+  const { eye, forward, right, up } = cameraVectors();
+  const aspect = W / H;
+  const fovy = 55 * Math.PI / 180;
+  const proj = mat4Perspective(fovy, aspect, 0.1, 420);
+  const view = mat4LookAt(eye, camTarget, up);
 
-  mouseVX *= 0.92;
-  mouseActive *= 0.985;
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  for (let i = 0; i < LAYERS.length; i++) stepBlades(blades[i], i, dt);
+  // Sky
+  gl.depthMask(false);
+  gl.useProgram(skyProg.program);
+  gl.uniform3fv(skyProg.u.uCamForward, forward);
+  gl.uniform3fv(skyProg.u.uCamRight, right);
+  gl.uniform3fv(skyProg.u.uCamUp, up);
+  gl.uniform1f(skyProg.u.uAspect, aspect);
+  gl.uniform1f(skyProg.u.uTanFov, Math.tan(fovy / 2));
+  gl.uniform3fv(skyProg.u.uSunDir, SUN_DIR);
+  gl.uniform1f(skyProg.u.uTime, time);
+  gl.bindVertexArray(skyVao);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.depthMask(true);
 
-  ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(skyCvs, 0, 0, W, H);
+  // Terrain
+  gl.useProgram(terrainProg.program);
+  gl.uniformMatrix4fv(terrainProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(terrainProg.u.uView, false, view);
+  gl.uniform3fv(terrainProg.u.uCamPos, eye);
+  gl.uniform3fv(terrainProg.u.uSunDir, SUN_DIR);
+  gl.uniform3fv(terrainProg.u.uFogColor, FOG_COLOR);
+  gl.bindVertexArray(terrainVao);
+  gl.drawElements(gl.TRIANGLES, terrainIndexCount, gl.UNSIGNED_INT, 0);
 
-  for (let i = 0; i < LAYERS.length; i++) renderLayer(blades[i], i);
+  // Grass
+  gl.useProgram(grassProg.program);
+  gl.uniformMatrix4fv(grassProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(grassProg.u.uView, false, view);
+  gl.uniform3fv(grassProg.u.uCamPos, eye);
+  gl.uniform1f(grassProg.u.uTime, time);
+  gl.uniform3fv(grassProg.u.uFogColor, FOG_COLOR);
+  gl.bindVertexArray(grassVao);
+  gl.drawElementsInstanced(gl.TRIANGLES, 18, gl.UNSIGNED_SHORT, 0, grassCount);
 
-  renderWindShadow();
-  renderSeeds(dt);
-
-  ctx.fillStyle = vignetteStyle;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.save();
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = grainPattern;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
+  // Flowers
+  gl.useProgram(flowerProg.program);
+  gl.uniformMatrix4fv(flowerProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(flowerProg.u.uView, false, view);
+  gl.uniform3fv(flowerProg.u.uCamPos, eye);
+  gl.uniform3fv(flowerProg.u.uCamRight, right);
+  gl.uniform3fv(flowerProg.u.uCamUp, up);
+  gl.uniform1f(flowerProg.u.uTime, time);
+  gl.uniform3fv(flowerProg.u.uFogColor, FOG_COLOR);
+  gl.bindVertexArray(flowerVao);
+  gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, FLOWER_COUNT);
 
   requestAnimationFrame(frame);
 }
-
-function toWorld(clientX, clientY) {
-  return [clientX, clientY];
-}
-
-window.addEventListener('mousemove', e => {
-  const [x, y] = toWorld(e.clientX, e.clientY);
-  if (lastMouseX > -9998) mouseVX = x - lastMouseX;
-  lastMouseX = x;
-  mouseX = x; mouseY = y;
-  mouseActive = 1;
-  document.getElementById('hint').style.opacity = '0';
-});
-
-window.addEventListener('touchmove', e => {
-  const t = e.touches[0];
-  if (!t) return;
-  const [x, y] = toWorld(t.clientX, t.clientY);
-  if (lastMouseX > -9998) mouseVX = x - lastMouseX;
-  lastMouseX = x;
-  mouseX = x; mouseY = y;
-  mouseActive = 1;
-}, { passive: true });
-
-window.addEventListener('resize', resize);
-
-buildGrain();
-resize();
 requestAnimationFrame(frame);
 </script>
 </body>
