@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painterly Meadow</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #1a2214; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #hint {
+    position: fixed; left: 18px; bottom: 14px;
+    font: 13px/1.4 Georgia, 'Times New Roman', serif;
+    color: rgba(255,250,235,0.75);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    pointer-events: none;
+    transition: opacity 1.2s ease;
+    letter-spacing: 0.3px;
+  }
+  #title {
+    position: fixed; left: 18px; top: 14px;
+    font: italic 20px/1.2 Georgia, 'Times New Roman', serif;
+    color: rgba(255,250,235,0.85);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.55);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="title">Painterly Meadow</div>
+<div id="hint">move the cursor to stir the wind</div>
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────────────────
+//  PERLIN-STYLE GRADIENT NOISE (2D)
+// ─────────────────────────────────────────────────────────
+const PERM = (() => {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let seed = 1337;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+  for (let i = 255; i > 0; i--) {
+    const j = (rnd() * (i + 1)) | 0;
+    [p[i], p[j]] = [p[j], p[i]];
+  }
+  const full = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) full[i] = p[i & 255];
+  return full;
+})();
+
+const GRAD = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+function fade(t) { return t*t*t*(t*(t*6-15)+10); }
+function lerp(a,b,t) { return a + t*(b-a); }
+
+function perlin2(x, y) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  const xf = x - Math.floor(x), yf = y - Math.floor(y);
+  const u = fade(xf), v = fade(yf);
+  const g = (ix, iy) => GRAD[PERM[(PERM[ix & 255] + iy) & 255] & 7];
+  const dot = (gv, dx, dy) => gv[0]*dx + gv[1]*dy;
+  const n00 = dot(g(X, Y),     xf,   yf);
+  const n10 = dot(g(X+1, Y),   xf-1, yf);
+  const n01 = dot(g(X, Y+1),   xf,   yf-1);
+  const n11 = dot(g(X+1, Y+1), xf-1, yf-1);
+  return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
+}
+
+// ─────────────────────────────────────────────────────────
+//  CANVAS SETUP
+// ─────────────────────────────────────────────────────────
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const skyCvs = document.createElement('canvas');
+const skyCtx = skyCvs.getContext('2d');
+const grainCvs = document.createElement('canvas');
+const grainCtx = grainCvs.getContext('2d');
+
+let W = 0, H = 0, DPR = 1;
+let horizonY = 0;
+
+const LAYERS = [
+  { name: 'back',  bandTop: 0.60, bandBot: 0.68, heightMin: 10, heightMax: 24, widthBase: 1.8, sat: 40, light: 33, alpha: 0.78, reactivity: 0.55, densityFactor: 0.55 },
+  { name: 'mid',   bandTop: 0.66, bandBot: 0.84, heightMin: 20, heightMax: 42, widthBase: 2.8, sat: 47, light: 29, alpha: 0.90, reactivity: 0.80, densityFactor: 0.50 },
+  { name: 'front', bandTop: 0.80, bandBot: 1.02, heightMin: 34, heightMax: 78, widthBase: 4.2, sat: 51, light: 25, alpha: 1.00, reactivity: 1.15, densityFactor: 0.40 },
+];
+
+let blades = null;   // typed-array bundle per layer
+let flowers = [];
+let seeds = [];
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+const BUCKETS_PER_LAYER = 18;
+
+function buildField() {
+  blades = LAYERS.map(layer => {
+    const bandTop = H * layer.bandTop, bandBot = H * layer.bandBot;
+    const count = Math.max(150, Math.min(1400, Math.round(W * layer.densityFactor)));
+    const x        = new Float32Array(count);
+    const baseY    = new Float32Array(count);
+    const height   = new Float32Array(count);
+    const width    = new Float32Array(count);
+    const angle    = new Float32Array(count);
+    const angVel   = new Float32Array(count);
+    const stiff    = new Float32Array(count);
+    const damp     = new Float32Array(count);
+    const drive    = new Float32Array(count);
+    const curl     = new Float32Array(count);
+    const bucket   = new Int32Array(count);
+
+    const bucketStyles = new Array(BUCKETS_PER_LAYER);
+    for (let b = 0; b < BUCKETS_PER_LAYER; b++) {
+      const bt = b / (BUCKETS_PER_LAYER - 1);
+      const hue   = lerp(76, 110, bt) + rand(-3, 3);
+      const light = layer.light + rand(-6, 9);
+      bucketStyles[b] = `hsl(${hue.toFixed(1)}, ${layer.sat}%, ${light.toFixed(1)}%)`;
+    }
+
+    for (let i = 0; i < count; i++) {
+      const t = Math.random();               // 0 = far edge of band, 1 = near edge
+      x[i]      = Math.random() * W;
+      baseY[i]  = lerp(bandTop, bandBot, t);
+      height[i] = lerp(layer.heightMin, layer.heightMax, t) * rand(0.85, 1.2);
+      width[i]  = layer.widthBase * lerp(0.7, 1.3, t) * rand(0.85, 1.15);
+      bucket[i] = (Math.random() * BUCKETS_PER_LAYER) | 0;
+      angle[i]  = rand(-0.08, 0.08);
+      angVel[i] = 0;
+      stiff[i]  = rand(28, 42);
+      damp[i]   = rand(6.5, 9.5);
+      drive[i]  = rand(7, 11) * layer.reactivity;
+      curl[i]   = rand(0.9, 1.5);
+    }
+    // sort by colour bucket (for batched fills), then back-to-front within a bucket
+    const order = Array.from({ length: count }, (_, i) => i)
+      .sort((a, b) => bucket[a] - bucket[b] || baseY[a] - baseY[b]);
+    const reorder = arr => { const c = arr.slice(); order.forEach((srcI, dstI) => arr[dstI] = c[srcI]); };
+    [x, baseY, height, width, angle, angVel, stiff, damp, drive, curl, bucket].forEach(reorder);
+
+    const bucketRanges = new Array(BUCKETS_PER_LAYER);
+    let cursor = 0;
+    for (let b = 0; b < BUCKETS_PER_LAYER; b++) {
+      const start = cursor;
+      while (cursor < count && bucket[cursor] === b) cursor++;
+      bucketRanges[b] = [start, cursor];
+    }
+
+    return { count, x, baseY, height, width, angle, angVel, stiff, damp, drive, curl, bucketRanges, bucketStyles, alpha: layer.alpha };
+  });
+
+  flowers = [];
+  const flowerCount = Math.round(W * 0.035);
+  const frontLayer = LAYERS[LAYERS.length - 1];
+  for (let i = 0; i < flowerCount; i++) {
+    flowers.push({
+      x: Math.random() * W,
+      y: rand(H * frontLayer.bandTop + 20, H * frontLayer.bandBot - 6),
+      size: rand(2.2, 4.2),
+      hue: Math.random() < 0.5 ? rand(45, 55) : rand(0, 10),
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  seeds = [];
+  const seedCount = 26;
+  for (let i = 0; i < seedCount; i++) {
+    seeds.push({
+      x: Math.random() * W,
+      y: rand(H * 0.2, H * 0.85),
+      vy: rand(-4, -10),
+      phase: Math.random() * Math.PI * 2,
+      size: rand(1.4, 2.6),
+    });
+  }
+}
+
+function paintCloudBlob(c, x, y, r, hueBase, alpha) {
+  const dabs = 10;
+  for (let i = 0; i < dabs; i++) {
+    const a = (i / dabs) * Math.PI * 2;
+    const rr = r * rand(0.4, 1.0);
+    const dx = x + Math.cos(a) * r * rand(0.2, 0.9);
+    const dy = y + Math.sin(a) * r * rand(0.15, 0.55);
+    const g = c.createRadialGradient(dx, dy, 0, dx, dy, rr);
+    g.addColorStop(0, `hsla(${hueBase}, 40%, 96%, ${alpha})`);
+    g.addColorStop(1, `hsla(${hueBase}, 40%, 96%, 0)`);
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(dx, dy, rr, 0, Math.PI * 2);
+    c.fill();
+  }
+}
+
+function stippleHill(c, baseY, amp, freq, hue, sat, light, count, seedOffset, fillBottom) {
+  c.beginPath();
+  c.moveTo(0, fillBottom);
+  const pts = 40;
+  const top = [];
+  for (let i = 0; i <= pts; i++) {
+    const px = (i / pts) * W;
+    const py = baseY - Math.sin(i * freq + seedOffset) * amp - perlin2(i * 0.3 + seedOffset, seedOffset) * amp * 0.6;
+    top.push(py);
+    c.lineTo(px, py);
+  }
+  c.lineTo(W, fillBottom);
+  c.closePath();
+  const grad = c.createLinearGradient(0, baseY - amp * 2, 0, fillBottom);
+  grad.addColorStop(0, `hsl(${hue}, ${sat}%, ${light}%)`);
+  grad.addColorStop(1, `hsl(${hue}, ${sat - 8}%, ${light - 10}%)`);
+  c.fillStyle = grad;
+  c.fill();
+
+  // painterly stippled texture over the hill
+  c.save();
+  c.clip();
+  for (let i = 0; i < count; i++) {
+    const px = Math.random() * W;
+    const py = rand(baseY - amp * 1.5, fillBottom);
+    const r = rand(3, 9);
+    c.fillStyle = `hsla(${hue + rand(-8,8)}, ${sat}%, ${light + rand(-8, 10)}%, ${rand(0.08, 0.22)})`;
+    c.beginPath();
+    c.ellipse(px, py, r, r * 0.6, rand(0, Math.PI), 0, Math.PI * 2);
+    c.fill();
+  }
+  c.restore();
+}
+
+function paintSky() {
+  skyCvs.width = W; skyCvs.height = H;
+  const c = skyCtx;
+
+  const sky = c.createLinearGradient(0, 0, 0, horizonY * 1.1);
+  sky.addColorStop(0,   '#fbe6a8');
+  sky.addColorStop(0.35,'#f8d497');
+  sky.addColorStop(0.62,'#f2b98f');
+  sky.addColorStop(0.85,'#e9a98f');
+  sky.addColorStop(1,   '#d9a08c');
+  c.fillStyle = sky;
+  c.fillRect(0, 0, W, horizonY * 1.15);
+
+  // sun glow
+  const sunX = W * 0.74, sunY = H * 0.26;
+  const glow = c.createRadialGradient(sunX, sunY, 0, sunX, sunY, W * 0.42);
+  glow.addColorStop(0, 'rgba(255,250,220,0.9)');
+  glow.addColorStop(0.15, 'rgba(255,240,190,0.55)');
+  glow.addColorStop(1, 'rgba(255,240,190,0)');
+  c.fillStyle = glow;
+  c.fillRect(0, 0, W, horizonY * 1.15);
+  c.beginPath();
+  c.fillStyle = 'rgba(255,253,235,0.95)';
+  c.arc(sunX, sunY, Math.max(18, W * 0.028), 0, Math.PI * 2);
+  c.fill();
+
+  // painterly clouds
+  for (let i = 0; i < 6; i++) {
+    paintCloudBlob(c, rand(0, W), rand(H * 0.06, H * 0.32), rand(W * 0.05, W * 0.11), 40, rand(0.10, 0.22));
+  }
+
+  // canvas-texture brush dabs across the whole sky for a painted feel
+  for (let i = 0; i < W * 0.25; i++) {
+    const px = Math.random() * W, py = Math.random() * horizonY * 1.1;
+    c.fillStyle = `hsla(${rand(28, 46)}, 60%, ${rand(70, 92)}%, ${rand(0.02, 0.06)})`;
+    c.beginPath();
+    c.ellipse(px, py, rand(4, 14), rand(2, 6), rand(0, Math.PI), 0, Math.PI * 2);
+    c.fill();
+  }
+
+  // distant + mid hills, painterly stippled — only reach a short way past the horizon
+  stippleHill(c, horizonY * 0.86, 22, 0.35, 96, 30, 46, W * 0.10, 12.5, horizonY * 1.02);
+  stippleHill(c, horizonY * 0.97, 30, 0.28, 100, 34, 38, W * 0.14, 47.1, horizonY * 1.20);
+
+  // ground base: seamless field colour the grass blades sit on top of
+  const groundTop = horizonY * 0.99;
+  const ground = c.createLinearGradient(0, groundTop, 0, H);
+  ground.addColorStop(0,   'hsl(98, 34%, 34%)');
+  ground.addColorStop(0.4, 'hsl(96, 40%, 24%)');
+  ground.addColorStop(1,   'hsl(92, 42%, 15%)');
+  c.fillStyle = ground;
+  c.fillRect(0, groundTop, W, H - groundTop);
+}
+
+function buildGrain() {
+  grainCvs.width = 160; grainCvs.height = 160;
+  const c = grainCtx;
+  const img = c.createImageData(160, 160);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 255 * Math.random();
+    img.data[i] = img.data[i+1] = img.data[i+2] = v;
+    img.data[i+3] = 18;
+  }
+  c.putImageData(img, 0, 0);
+}
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  horizonY = H * 0.58;
+  buildField();
+  paintSky();
+  if (grainCvs.width) rebuildCachedStyles();
+}
+
+// ─────────────────────────────────────────────────────────
+//  WIND FIELD
+// ─────────────────────────────────────────────────────────
+let mouseX = -9999, mouseY = -9999, mouseVX = 0, lastMouseX = -9999, mouseActive = 0;
+
+function gustEnvelope(t) {
+  return 0.35 + 0.65 * (0.5 + 0.5 * perlin2(t * 0.045, 91.4));
+}
+
+function windAt(x, t, reactivity) {
+  const drift  = perlin2(x * 0.0009 + t * 0.06, t * 0.09) * 0.65;
+  const ripple = perlin2(x * 0.0045 + t * 0.35, 200 + t * 0.22) * 0.45;
+  const gustWave = Math.sin(x * 0.0016 - t * 1.15) * gustEnvelope(t);
+  let w = (drift + ripple) * 0.6 + gustWave * 0.55;
+
+  if (mouseActive > 0.01) {
+    const dx = x - mouseX;
+    const sigma = 120;
+    const falloff = Math.exp(-(dx * dx) / (2 * sigma * sigma));
+    w += falloff * mouseVX * 0.045 * mouseActive;
+  }
+  return w * reactivity;
+}
+
+// ─────────────────────────────────────────────────────────
+//  SIMULATION + RENDER
+// ─────────────────────────────────────────────────────────
+const MAX_ANGLE = 1.05;
+let simTime = 0;
+let lastFrame = performance.now();
+
+function stepBlades(layerData, layerIdx, dt) {
+  const { count, x, angle, angVel, stiff, damp, drive } = layerData;
+  const layer = LAYERS[layerIdx];
+  for (let i = 0; i < count; i++) {
+    const w = windAt(x[i], simTime, layer.reactivity);
+    const a = angle[i];
+    const accel = w * drive[i] - stiff[i] * a - damp[i] * angVel[i];
+    angVel[i] += accel * dt;
+    let na = a + angVel[i] * dt;
+    if (na > MAX_ANGLE) { na = MAX_ANGLE; angVel[i] *= -0.3; }
+    if (na < -MAX_ANGLE) { na = -MAX_ANGLE; angVel[i] *= -0.3; }
+    angle[i] = na;
+  }
+}
+
+// A slightly-kinked tapered polygon — cheaper to rasterize than a bezier blade
+// while still reading as a bent grass leaf at typical on-screen sizes.
+function traceBlade(baseX, baseY, height, halfWidth, angle, curl) {
+  const lean = Math.sin(angle), up = Math.cos(angle);
+  const tipX = baseX + height * lean * curl;
+  const tipY = baseY - height * up;
+  const midX = baseX + height * 0.5 * lean * 1.35;
+  const midY = baseY - height * 0.5 * up;
+  const px = up, py = lean; // perpendicular to the blade's up direction
+  const hw2 = halfWidth * 0.35;
+
+  ctx.moveTo(baseX - px * halfWidth, baseY - py * halfWidth);
+  ctx.lineTo(midX - px * hw2, midY - py * hw2);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineTo(midX + px * hw2, midY + py * hw2);
+  ctx.lineTo(baseX + px * halfWidth, baseY + py * halfWidth);
+}
+
+function renderLayer(layerData, layerIdx) {
+  const { x, baseY, height, width, angle, curl, bucketRanges, bucketStyles, alpha } = layerData;
+
+  ctx.globalAlpha = alpha;
+  for (let b = 0; b < bucketRanges.length; b++) {
+    const [start, end] = bucketRanges[b];
+    if (start === end) continue;
+    ctx.beginPath();
+    for (let i = start; i < end; i++) {
+      traceBlade(x[i], baseY[i], height[i], width[i] * 0.5, angle[i], curl[i]);
+    }
+    ctx.fillStyle = bucketStyles[b];
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  if (layerIdx === LAYERS.length - 1) {
+    for (const f of flowers) {
+      const sway = Math.sin(simTime * 1.4 + f.phase) * 3;
+      ctx.beginPath();
+      ctx.fillStyle = `hsla(${f.hue}, 70%, 62%, 0.9)`;
+      ctx.arc(f.x + sway, f.y, f.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function renderWindShadow() {
+  const stops = 24;
+  const top = horizonY * 0.95;
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  for (let i = 0; i <= stops; i++) {
+    const x0 = (i / stops) * W;
+    const sample = windAt(x0, simTime, 1);
+    const shade = 0.5 - sample * 0.16;
+    g.addColorStop(i / stops, `hsla(90, 30%, ${Math.round(shade * 100)}%, 0.14)`);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, top, W, H - top);
+  ctx.restore();
+}
+
+function renderSeeds(dt) {
+  ctx.globalAlpha = 0.85;
+  for (const s of seeds) {
+    const w = windAt(s.x, simTime, 1.4);
+    s.x += (w * 26 + 6) * dt;
+    s.y += (s.vy + Math.sin(simTime * 2 + s.phase) * 6) * dt;
+    if (s.x > W + 10) s.x = -10;
+    if (s.x < -10) s.x = W + 10;
+    if (s.y < -10) { s.y = H * 0.9; s.x = Math.random() * W; }
+    ctx.fillStyle = 'rgba(255,255,250,0.8)';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+let vignetteStyle = null;
+let grainPattern = null;
+
+function rebuildCachedStyles() {
+  const vg = ctx.createRadialGradient(W/2, H*0.55, H*0.25, W/2, H*0.55, H*0.85);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(20,14,6,0.32)');
+  vignetteStyle = vg;
+  grainPattern = ctx.createPattern(grainCvs, 'repeat');
+}
+
+function frame(now) {
+  let dt = (now - lastFrame) / 1000;
+  lastFrame = now;
+  if (dt > 0.05) dt = 0.05;
+  simTime += dt;
+
+  mouseVX *= 0.92;
+  mouseActive *= 0.985;
+
+  for (let i = 0; i < LAYERS.length; i++) stepBlades(blades[i], i, dt);
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(skyCvs, 0, 0, W, H);
+
+  for (let i = 0; i < LAYERS.length; i++) renderLayer(blades[i], i);
+
+  renderWindShadow();
+  renderSeeds(dt);
+
+  ctx.fillStyle = vignetteStyle;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = grainPattern;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  requestAnimationFrame(frame);
+}
+
+function toWorld(clientX, clientY) {
+  return [clientX, clientY];
+}
+
+window.addEventListener('mousemove', e => {
+  const [x, y] = toWorld(e.clientX, e.clientY);
+  if (lastMouseX > -9998) mouseVX = x - lastMouseX;
+  lastMouseX = x;
+  mouseX = x; mouseY = y;
+  mouseActive = 1;
+  document.getElementById('hint').style.opacity = '0';
+});
+
+window.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  if (!t) return;
+  const [x, y] = toWorld(t.clientX, t.clientY);
+  if (lastMouseX > -9998) mouseVX = x - lastMouseX;
+  lastMouseX = x;
+  mouseX = x; mouseY = y;
+  mouseActive = 1;
+}, { passive: true });
+
+window.addEventListener('resize', resize);
+
+buildGrain();
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
