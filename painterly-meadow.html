@@ -107,8 +107,47 @@ function fbm(x, y, octaves) {
   }
   return total / sum;
 }
-function heightAt(x, z) {
+function baseHeightAt(x, z) {
   return (fbm(x*0.010, z*0.010, 4) - 0.5) * 15 + (fbm(x*0.06+50, z*0.06+50, 3) - 0.5) * 2.2;
+}
+function smoothstepJS(e0, e1, x) {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+// ── Lake basin (elongated ellipse, carved into the terrain) ──
+const LAKE = { x: 24, z: 6, halfWidth: 13, halfLength: 40, depth: 7 };
+function lakeMask(x, z) {
+  const dx = (x - LAKE.x) / LAKE.halfWidth, dz = (z - LAKE.z) / LAKE.halfLength;
+  const d = Math.hypot(dx, dz);
+  return 1 - smoothstepJS(0.62, 1.0, d); // 1 at center, 0 at/after the shore
+}
+
+// ── Railway grade: a gentle corridor flattened toward a graded line ──
+const TRACK_Z = LAKE.z;
+const TRACK_X_START = -85, TRACK_X_END = 100;
+const BRIDGE_X0 = LAKE.x - LAKE.halfWidth - 3, BRIDGE_X1 = LAKE.x + LAKE.halfWidth + 3;
+const BRIDGE_DECK_Y = Math.max(baseHeightAt(BRIDGE_X0, TRACK_Z), baseHeightAt(BRIDGE_X1, TRACK_Z)) + 2.6;
+const TRACK_Y_START = baseHeightAt(TRACK_X_START, TRACK_Z);
+const TRACK_Y_END = baseHeightAt(TRACK_X_END, TRACK_Z);
+function trackGradeY(x) {
+  if (x < BRIDGE_X0) return TRACK_Y_START + (BRIDGE_DECK_Y - TRACK_Y_START) * smoothstepJS(TRACK_X_START, BRIDGE_X0, x);
+  if (x > BRIDGE_X1) return BRIDGE_DECK_Y + (TRACK_Y_END - BRIDGE_DECK_Y) * smoothstepJS(BRIDGE_X1, TRACK_X_END, x);
+  return BRIDGE_DECK_Y;
+}
+function heightAt(x, z) {
+  let h = baseHeightAt(x, z);
+  const lm = lakeMask(x, z);
+  if (lm > 0) h -= lm * LAKE.depth;
+  // Grade a flat rail corridor on dry land only — the bridge span itself
+  // stays lake-carved (water sits underneath, not blended terrain).
+  if (x < BRIDGE_X0 || x > BRIDGE_X1) {
+    const corridor = 1 - smoothstepJS(7, 11, Math.abs(z - TRACK_Z));
+    if (corridor > 0 && x > TRACK_X_START - 6 && x < TRACK_X_END + 6) {
+      h += (trackGradeY(x) - h) * corridor;
+    }
+  }
+  return h;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -146,21 +185,25 @@ void main() {
   vec3 dir = normalize(uCamForward + uCamRight * (vUv.x * uAspect * uTanFov) + uCamUp * (vUv.y * uTanFov));
   float h = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
 
-  vec3 low  = vec3(0.85, 0.60, 0.53);
-  vec3 mid  = vec3(0.97, 0.73, 0.55);
-  vec3 high = vec3(0.97, 0.87, 0.66);
-  vec3 sky = mix(low, mid, smoothstep(0.0, 0.45, h));
-  sky = mix(sky, high, smoothstep(0.45, 1.0, h));
+  vec3 low   = vec3(0.90, 0.38, 0.26);
+  vec3 mid   = vec3(0.96, 0.58, 0.34);
+  vec3 upper = vec3(0.62, 0.42, 0.52);
+  vec3 high  = vec3(0.13, 0.16, 0.36);
+  vec3 sky = mix(low, mid, smoothstep(0.0, 0.22, h));
+  sky = mix(sky, upper, smoothstep(0.22, 0.55, h));
+  sky = mix(sky, high, smoothstep(0.55, 1.0, h));
 
   float sun = max(dot(dir, uSunDir), 0.0);
-  sky += vec3(1.0, 0.92, 0.75) * pow(sun, 340.0) * 3.0;
-  sky += vec3(1.0, 0.85, 0.6) * pow(sun, 12.0) * 0.55;
+  sky += vec3(1.0, 0.78, 0.45) * pow(sun, 700.0) * 5.0;
+  sky += vec3(1.0, 0.62, 0.32) * pow(sun, 40.0) * 1.1;
+  sky += vec3(1.0, 0.5, 0.25) * pow(sun, 6.0) * 0.35;
 
   if (dir.y > -0.02) {
     vec2 cp = dir.xz / (dir.y + 0.35) * 0.6 + uTime * 0.006;
     float clouds = fbm(cp * 1.3);
-    float mask = smoothstep(0.55, 0.85, clouds) * smoothstep(-0.02, 0.25, dir.y);
-    sky = mix(sky, vec3(1.0, 0.97, 0.92), mask * 0.55);
+    float mask = smoothstep(0.55, 0.85, clouds) * smoothstep(-0.02, 0.35, dir.y);
+    vec3 cloudLit = mix(vec3(0.85, 0.42, 0.30), vec3(1.0, 0.85, 0.72), clamp(sun*1.4, 0.0, 1.0));
+    sky = mix(sky, cloudLit, mask * 0.6);
   }
 
   outColor = vec4(sky, 1.0);
@@ -311,6 +354,252 @@ void main() {
 }
 `;
 
+// ── Water ──
+const WATER_VS = `#version 300 es
+in vec3 aPos;
+out vec3 vWorldPos;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamPos;
+uniform float uTime;
+void main() {
+  vec3 p = aPos;
+  p.y += sin(p.x * 0.22 + uTime * 1.1) * 0.05 + cos(p.z * 0.18 - uTime * 0.8) * 0.04;
+  vWorldPos = p;
+  vDist = distance(p, uCamPos);
+  gl_Position = uProj * uView * vec4(p, 1.0);
+}
+`;
+
+const WATER_FS = `#version 300 es
+precision highp float;
+in vec3 vWorldPos;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uFogColor;
+uniform float uTime;
+${NOISE_GLSL}
+void main() {
+  vec3 viewDir = normalize(uCamPos - vWorldPos);
+  float fresnel = pow(1.0 - clamp(viewDir.y, 0.0, 1.0), 3.0);
+  vec3 deep = vec3(0.04, 0.14, 0.20);
+  vec3 shallow = vec3(0.14, 0.30, 0.30);
+  vec3 col = mix(deep, shallow, fresnel);
+
+  vec3 skyTint = vec3(0.80, 0.46, 0.36);
+  col = mix(col, skyTint, fresnel * 0.6);
+
+  vec2 rp = vWorldPos.xz * 3.0 + vec2(uTime * 0.6, uTime * 0.4);
+  float n = noiseG(rp);
+  vec3 reflectDir = reflect(-viewDir, vec3(0.0, 1.0, 0.0));
+  float spec = pow(max(dot(reflectDir, uSunDir), 0.0), 50.0);
+  col += vec3(1.0, 0.72, 0.48) * spec * smoothstep(0.5, 0.9, n) * 2.4;
+
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+// ── Trees (instanced, gentle foliage sway) ──
+const TREE_VS = `#version 300 es
+in vec3 aLocal;
+in vec3 aNormal;
+in vec3 aColorBase;
+in vec3 aInstPos;
+in vec3 aInstData; // scale, rotationY, phase
+out vec3 vColor;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamPos, uSunDir;
+uniform float uTime, uSwayAmount;
+${NOISE_GLSL}
+void main() {
+  float ca = cos(aInstData.y), sa = sin(aInstData.y);
+  vec3 scaled = aLocal * aInstData.x;
+  vec3 rotated = vec3(scaled.x*ca - scaled.z*sa, scaled.y, scaled.x*sa + scaled.z*ca);
+  vec3 normRot = vec3(aNormal.x*ca - aNormal.z*sa, aNormal.y, aNormal.x*sa + aNormal.z*ca);
+  vec3 worldPos = aInstPos + rotated;
+
+  vec2 wind = windAt(aInstPos.xz + aInstData.z * 3.0, uTime) * 0.4;
+  worldPos.x += wind.x * uSwayAmount;
+  worldPos.z += wind.y * uSwayAmount;
+
+  float diffuse = max(dot(normalize(normRot), uSunDir), 0.0);
+  float lightF = diffuse * 0.55 + 0.5;
+  vColor = aColorBase * lightF;
+  vDist = distance(worldPos, uCamPos);
+  gl_Position = uProj * uView * vec4(worldPos, 1.0);
+}
+`;
+
+const TREE_FS = `#version 300 es
+precision highp float;
+in vec3 vColor;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uFogColor;
+void main() {
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  vec3 col = mix(vColor, uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+// ── Static "prop" meshes baked in world space (bridge, track) ──
+const PROP_VS = `#version 300 es
+in vec3 aPos;
+in vec3 aColor;
+out vec3 vColor;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamPos;
+void main() {
+  vColor = aColor;
+  vDist = distance(aPos, uCamPos);
+  gl_Position = uProj * uView * vec4(aPos, 1.0);
+}
+`;
+
+const PROP_FS = `#version 300 es
+precision highp float;
+in vec3 vColor;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uFogColor;
+void main() {
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  vec3 col = mix(vColor, uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+// ── Train: object-space mesh transformed by a per-frame model matrix ──
+const TRAIN_VS = `#version 300 es
+in vec3 aPos;
+in vec3 aColor;
+out vec3 vColor;
+out float vDist;
+uniform mat4 uProj, uView, uModel;
+uniform vec3 uCamPos;
+void main() {
+  vec4 world = uModel * vec4(aPos, 1.0);
+  vColor = aColor;
+  vDist = distance(world.xyz, uCamPos);
+  gl_Position = uProj * uView * world;
+}
+`;
+
+// ── Steam puffs (billboard particles rising from the funnel) ──
+const STEAM_VS = `#version 300 es
+in vec2 aLocal;
+in float aPhase;
+out vec2 vLocal;
+out float vAge;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamRight, uCamUp, uCamPos;
+uniform vec3 uFunnelPos, uFunnelDrift;
+uniform float uTime;
+void main() {
+  float age = fract(uTime * 0.35 + aPhase);
+  vAge = age;
+  float size = mix(0.25, 1.6, age);
+  vec3 base = uFunnelPos + uFunnelDrift * age * 6.0 + vec3(0.0, age * 5.0, 0.0);
+  vec3 worldPos = base + uCamRight * (aLocal.x * size) + uCamUp * (aLocal.y * size);
+  vLocal = aLocal;
+  vDist = distance(worldPos, uCamPos);
+  gl_Position = uProj * uView * vec4(worldPos, 1.0);
+}
+`;
+
+const STEAM_FS = `#version 300 es
+precision highp float;
+in vec2 vLocal;
+in float vAge;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uFogColor;
+void main() {
+  float d = length(vLocal);
+  if (d > 1.0) discard;
+  float alpha = smoothstep(1.0, 0.3, d) * smoothstep(0.0, 0.12, vAge) * smoothstep(1.0, 0.55, vAge) * 0.55;
+  vec3 col = mix(vec3(0.95, 0.93, 0.90), uFogColor, 0.15);
+  outColor = vec4(col, alpha);
+}
+`;
+
+// ── Birds (small flapping silhouettes circling the sky) ──
+const BIRD_VS = `#version 300 es
+in vec2 aLocal;   // x: spanwise (-1..1, 0 = body), y: chordwise (0 = leading edge, -1 = tail)
+in vec4 aInstData; // radius, height, speed, phase
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamPos;
+uniform float uTime;
+void main() {
+  float ang = uTime * aInstData.z + aInstData.w;
+  vec3 center = vec3(cos(ang) * aInstData.x, aInstData.y, sin(ang) * aInstData.x);
+  float heading = ang + 1.5708;
+  float flap = sin(uTime * 9.0 + aInstData.w * 10.0) * 0.55 + 0.45;
+  vec3 local = vec3(aLocal.x * 1.7, abs(aLocal.x) * flap * 1.0, aLocal.y * 1.5);
+  float ch = cos(heading), sh = sin(heading);
+  vec3 rotated = vec3(local.x*ch - local.z*sh, local.y, local.x*sh + local.z*ch);
+  vec3 worldPos = center + rotated;
+  vDist = distance(worldPos, uCamPos);
+  gl_Position = uProj * uView * vec4(worldPos, 1.0);
+}
+`;
+
+const BIRD_FS = `#version 300 es
+precision highp float;
+in float vDist;
+out vec4 outColor;
+uniform vec3 uFogColor;
+void main() {
+  float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
+  vec3 col = mix(vec3(0.12, 0.09, 0.10), uFogColor, clamp(fog, 0.0, 1.0));
+  outColor = vec4(col, 1.0);
+}
+`;
+
+// ── Clouds (soft drifting billboards) ──
+const CLOUD_VS = `#version 300 es
+in vec2 aLocal;
+in vec3 aInstPos;
+in vec4 aInstData; // size, drift speed, phase, tint
+out vec2 vLocal;
+out float vTint;
+out float vDist;
+uniform mat4 uProj, uView;
+uniform vec3 uCamRight, uCamUp, uCamPos;
+uniform float uTime;
+void main() {
+  vec3 pos = aInstPos + vec3(uTime * aInstData.y, 0.0, uTime * aInstData.y * 0.3);
+  vec3 worldPos = pos + uCamRight * (aLocal.x * aInstData.x) + uCamUp * (aLocal.y * aInstData.x * 0.6);
+  vLocal = aLocal;
+  vTint = aInstData.w;
+  vDist = distance(worldPos, uCamPos);
+  gl_Position = uProj * uView * vec4(worldPos, 1.0);
+}
+`;
+
+const CLOUD_FS = `#version 300 es
+precision highp float;
+in vec2 vLocal;
+in float vTint;
+in float vDist;
+out vec4 outColor;
+void main() {
+  float d = length(vLocal);
+  float alpha = smoothstep(1.0, 0.35, d) * 0.5;
+  vec3 col = mix(vec3(0.85, 0.42, 0.32), vec3(1.0, 0.88, 0.78), vTint);
+  outColor = vec4(col, alpha);
+}
+`;
+
 function compile(type, src) {
   const s = gl.createShader(type);
   gl.shaderSource(s, src);
@@ -345,6 +634,21 @@ const grassProg = locs(createProgram(GRASS_VS, GRASS_FS),
   ['uProj','uView','uCamPos','uTime','uFogColor'], ['aLocal','aInstPos','aInstData']);
 const flowerProg = locs(createProgram(FLOWER_VS, FLOWER_FS),
   ['uProj','uView','uCamPos','uCamRight','uCamUp','uTime','uFogColor'], ['aLocal','aInstPos','aInstData']);
+const waterProg = locs(createProgram(WATER_VS, WATER_FS),
+  ['uProj','uView','uCamPos','uSunDir','uFogColor','uTime'], ['aPos']);
+const treeProg = locs(createProgram(TREE_VS, TREE_FS),
+  ['uProj','uView','uCamPos','uSunDir','uTime','uSwayAmount','uFogColor'],
+  ['aLocal','aNormal','aColorBase','aInstPos','aInstData']);
+const propProg = locs(createProgram(PROP_VS, PROP_FS),
+  ['uProj','uView','uCamPos','uFogColor'], ['aPos','aColor']);
+const trainProg = locs(createProgram(TRAIN_VS, PROP_FS),
+  ['uProj','uView','uModel','uCamPos','uFogColor'], ['aPos','aColor']);
+const steamProg = locs(createProgram(STEAM_VS, STEAM_FS),
+  ['uProj','uView','uCamRight','uCamUp','uCamPos','uFunnelPos','uFunnelDrift','uTime','uFogColor'], ['aLocal','aPhase']);
+const birdProg = locs(createProgram(BIRD_VS, BIRD_FS),
+  ['uProj','uView','uCamPos','uTime','uFogColor'], ['aLocal','aInstData']);
+const cloudProg = locs(createProgram(CLOUD_VS, CLOUD_FS),
+  ['uProj','uView','uCamRight','uCamUp','uCamPos','uTime'], ['aLocal','aInstPos','aInstData']);
 
 // ─────────────────────────────────────────────────────────
 //  SKY QUAD
@@ -437,9 +741,11 @@ let terrainVao, terrainIndexCount;
 // ─────────────────────────────────────────────────────────
 const GRASS_RADIUS = 95;
 const GRASS_COUNT = 30000;
-function smoothstepJS(e0, e1, x) {
-  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
+
+function blockedByLakeOrTrack(x, z) {
+  if (lakeMask(x, z) > 0.04) return true;
+  if (Math.abs(z - TRACK_Z) < 4.2 && x > TRACK_X_START - 4 && x < TRACK_X_END + 4) return true;
+  return false;
 }
 
 let grassVao, grassCount;
@@ -462,6 +768,7 @@ let grassVao, grassCount;
     // long, gradual taper — thins out over most of the radius rather than a hard ring
     const edgeFade = 1 - smoothstepJS(GRASS_RADIUS * 0.3, GRASS_RADIUS, r);
     if (Math.random() > edgeFade) continue;
+    if (blockedByLakeOrTrack(x, z)) continue;
     instPos[n*3] = x; instPos[n*3+1] = heightAt(x, z); instPos[n*3+2] = z;
     instData[n*4]   = rand(0.55, 1.15) * (0.35 + 0.65*edgeFade); // scale
     instData[n*4+1] = Math.random() * Math.PI * 2;             // rotation
@@ -511,9 +818,12 @@ let flowerVao;
   const instPos = new Float32Array(FLOWER_COUNT * 3);
   const instData = new Float32Array(FLOWER_COUNT * 4);
   for (let i = 0; i < FLOWER_COUNT; i++) {
-    const r = Math.sqrt(Math.random()) * GRASS_RADIUS * 0.85;
-    const a = Math.random() * Math.PI * 2;
-    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    let x, z;
+    do {
+      const r = Math.sqrt(Math.random()) * GRASS_RADIUS * 0.85;
+      const a = Math.random() * Math.PI * 2;
+      x = Math.cos(a) * r; z = Math.sin(a) * r;
+    } while (blockedByLakeOrTrack(x, z));
     instPos[i*3] = x; instPos[i*3+1] = heightAt(x, z) + 0.12; instPos[i*3+2] = z;
     instData[i*4]   = rand(0.05, 0.09);
     instData[i*4+1] = Math.random() < 0.5 ? 1 : 0;
@@ -550,6 +860,463 @@ let flowerVao;
 }
 
 // ─────────────────────────────────────────────────────────
+//  MESH-BUILDER HELPERS (for water/trees/bridge/track/train)
+// ─────────────────────────────────────────────────────────
+function buildFrustum(radiusBottom, radiusTop, height, sides, colorBottom, colorTop, capBottom) {
+  const positions = [], normals = [], colors = [];
+  const slope = Math.atan2(radiusBottom - radiusTop, height);
+  for (let i = 0; i < sides; i++) {
+    const a0 = (i / sides) * Math.PI * 2, a1 = ((i + 1) / sides) * Math.PI * 2;
+    const xb0 = Math.cos(a0) * radiusBottom, zb0 = Math.sin(a0) * radiusBottom;
+    const xb1 = Math.cos(a1) * radiusBottom, zb1 = Math.sin(a1) * radiusBottom;
+    const xt0 = Math.cos(a0) * radiusTop, zt0 = Math.sin(a0) * radiusTop;
+    const xt1 = Math.cos(a1) * radiusTop, zt1 = Math.sin(a1) * radiusTop;
+    const nxm = Math.cos((a0 + a1) / 2), nzm = Math.sin((a0 + a1) / 2);
+    const ny = Math.sin(slope), nc = Math.cos(slope);
+    positions.push(xb0,0,zb0,  xb1,0,zb1,  xt1,height,zt1);
+    positions.push(xb0,0,zb0,  xt1,height,zt1,  xt0,height,zt0);
+    for (let k = 0; k < 6; k++) normals.push(nxm*nc, ny, nzm*nc);
+    colors.push(...colorBottom, ...colorBottom, ...colorTop, ...colorBottom, ...colorTop, ...colorTop);
+  }
+  if (capBottom) {
+    for (let i = 0; i < sides; i++) {
+      const a0 = (i / sides) * Math.PI * 2, a1 = ((i + 1) / sides) * Math.PI * 2;
+      const xb0 = Math.cos(a0) * radiusBottom, zb0 = Math.sin(a0) * radiusBottom;
+      const xb1 = Math.cos(a1) * radiusBottom, zb1 = Math.sin(a1) * radiusBottom;
+      positions.push(0,0,0,  xb1,0,zb1,  xb0,0,zb0);
+      for (let k = 0; k < 3; k++) normals.push(0,-1,0);
+      colors.push(...colorBottom, ...colorBottom, ...colorBottom);
+    }
+  }
+  return { positions, normals, colors };
+}
+function mergeMeshes(parts) {
+  const positions = [], normals = [], colors = [];
+  for (const { mesh, offset = [0,0,0] } of parts) {
+    for (let i = 0; i < mesh.positions.length; i += 3) {
+      positions.push(mesh.positions[i]+offset[0], mesh.positions[i+1]+offset[1], mesh.positions[i+2]+offset[2]);
+    }
+    normals.push(...mesh.normals);
+    colors.push(...mesh.colors);
+  }
+  return { positions, normals, colors };
+}
+// Axis-aligned box, centered at (cx,cy,cz), flat-shaded per-face with a fixed
+// baked light factor — used for static props (bridge, track) with no shader lighting.
+function buildBox(cx, cy, cz, sx, sy, sz, color) {
+  const hx=sx/2, hy=sy/2, hz=sz/2;
+  const faces = [
+    { n:[0,1,0],  light:1.08, v:[[-hx,hy,-hz],[hx,hy,-hz],[hx,hy,hz],[-hx,hy,hz]] },
+    { n:[0,-1,0], light:0.55, v:[[-hx,-hy,hz],[hx,-hy,hz],[hx,-hy,-hz],[-hx,-hy,-hz]] },
+    { n:[1,0,0],  light:0.85, v:[[hx,-hy,-hz],[hx,hy,-hz],[hx,hy,hz],[hx,-hy,hz]] },
+    { n:[-1,0,0], light:0.68, v:[[-hx,-hy,hz],[-hx,hy,hz],[-hx,hy,-hz],[-hx,-hy,-hz]] },
+    { n:[0,0,1],  light:0.95, v:[[-hx,-hy,hz],[hx,-hy,hz],[hx,hy,hz],[-hx,hy,hz]] },
+    { n:[0,0,-1], light:0.62, v:[[hx,-hy,-hz],[-hx,-hy,-hz],[-hx,hy,-hz],[hx,hy,-hz]] },
+  ];
+  const positions = [], colors = [];
+  for (const f of faces) {
+    const c = [color[0]*f.light, color[1]*f.light, color[2]*f.light];
+    const [a,b,cc,d] = f.v;
+    positions.push(
+      cx+a[0],cy+a[1],cz+a[2],  cx+b[0],cy+b[1],cz+b[2],  cx+cc[0],cy+cc[1],cz+cc[2],
+      cx+a[0],cy+a[1],cz+a[2],  cx+cc[0],cy+cc[1],cz+cc[2],  cx+d[0],cy+d[1],cz+d[2],
+    );
+    for (let k = 0; k < 6; k++) colors.push(...c);
+  }
+  return { positions, colors };
+}
+
+// ─────────────────────────────────────────────────────────
+//  LAKE / WATER
+// ─────────────────────────────────────────────────────────
+let waterVao, waterVertCount, WATER_Y;
+{
+  const shoreA = heightAt(LAKE.x + LAKE.halfWidth * 0.9, LAKE.z);
+  const shoreB = heightAt(LAKE.x, LAKE.z + LAKE.halfLength * 0.9);
+  WATER_Y = Math.min(shoreA, shoreB) - 0.3;
+
+  const segs = 56;
+  const positions = [WATER_Y === WATER_Y ? LAKE.x : LAKE.x, WATER_Y, LAKE.z];
+  for (let i = 0; i <= segs; i++) {
+    const t = (i / segs) * Math.PI * 2;
+    positions.push(LAKE.x + Math.cos(t) * LAKE.halfWidth * 0.93, WATER_Y, LAKE.z + Math.sin(t) * LAKE.halfLength * 0.93);
+  }
+  const idx = [];
+  for (let i = 1; i <= segs; i++) idx.push(0, i, i+1);
+
+  waterVao = gl.createVertexArray();
+  gl.bindVertexArray(waterVao);
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(waterProg.a.aPos);
+  gl.vertexAttribPointer(waterProg.a.aPos, 3, gl.FLOAT, false, 0, 0);
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+  waterVertCount = idx.length;
+}
+
+// ─────────────────────────────────────────────────────────
+//  TREES (instanced trunk + swaying foliage)
+// ─────────────────────────────────────────────────────────
+const TRUNK_MESH = buildFrustum(0.30, 0.19, 1.75, 7, [0.28,0.19,0.11], [0.34,0.24,0.15], false);
+const FOLIAGE_MESH = mergeMeshes([
+  { mesh: buildFrustum(1.35, 0.05, 2.6, 8, [0.09,0.26,0.10], [0.20,0.40,0.15], true), offset: [0,1.35,0] },
+  { mesh: buildFrustum(1.05, 0.05, 2.2, 8, [0.11,0.30,0.11], [0.24,0.44,0.17], true), offset: [0,2.75,0] },
+  { mesh: buildFrustum(0.72, 0.02, 1.7, 8, [0.14,0.34,0.13], [0.28,0.48,0.19], true), offset: [0,3.95,0] },
+]);
+
+const TREE_COUNT = 240;
+let treeCount, trunkVao, foliageVao;
+{
+  const instPos = [], instData = [];
+  let n = 0, guard = 0;
+  while (n < TREE_COUNT && guard < TREE_COUNT * 40) {
+    guard++;
+    const x = rand(-136, 136), z = rand(-136, 136);
+    const distC = Math.hypot(x, z);
+    if (distC < 42 && Math.random() > 0.05) continue;
+    if (blockedByLakeOrTrack(x, z)) continue;
+    if (lakeMask(x, z) > 0.02) continue;
+    instPos.push(x, heightAt(x, z), z);
+    instData.push(rand(0.85, 1.35), Math.random() * Math.PI * 2, Math.random() * 100);
+    n++;
+  }
+  treeCount = n;
+  const instPosArr = new Float32Array(instPos);
+  const instDataArr = new Float32Array(instData);
+
+  function makeTreeVao(mesh) {
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.positions), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(treeProg.a.aLocal);
+    gl.vertexAttribPointer(treeProg.a.aLocal, 3, gl.FLOAT, false, 0, 0);
+
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.normals), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(treeProg.a.aNormal);
+    gl.vertexAttribPointer(treeProg.a.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.colors), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(treeProg.a.aColorBase);
+    gl.vertexAttribPointer(treeProg.a.aColorBase, 3, gl.FLOAT, false, 0, 0);
+
+    const ipBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, ipBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, instPosArr, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(treeProg.a.aInstPos);
+    gl.vertexAttribPointer(treeProg.a.aInstPos, 3, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(treeProg.a.aInstPos, 1);
+
+    const idBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, idBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, instDataArr, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(treeProg.a.aInstData);
+    gl.vertexAttribPointer(treeProg.a.aInstData, 3, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(treeProg.a.aInstData, 1);
+
+    return { vao, vertCount: mesh.positions.length / 3 };
+  }
+  trunkVao = makeTreeVao(TRUNK_MESH);
+  foliageVao = makeTreeVao(FOLIAGE_MESH);
+}
+
+// ─────────────────────────────────────────────────────────
+//  BRIDGE + RAILWAY TRACK (static baked "prop" mesh)
+// ─────────────────────────────────────────────────────────
+let propVao, propVertCount;
+{
+  const STONE = [0.56, 0.52, 0.48];
+  const STONE_DARK = [0.42, 0.39, 0.36];
+  const RAIL_Z0 = TRACK_Z - 0.7, RAIL_Z1 = TRACK_Z + 0.7;
+  const deckHalfSpan = LAKE.halfWidth + 4;
+  const deckWidth = 7.5;
+
+  let positions = [], colors = [];
+  function addBox(cx, cy, cz, sx, sy, sz, color) {
+    const b = buildBox(cx, cy, cz, sx, sy, sz, color);
+    positions.push(...b.positions); colors.push(...b.colors);
+  }
+
+  // Bridge deck
+  addBox(LAKE.x, BRIDGE_DECK_Y - 0.4, TRACK_Z, deckHalfSpan * 2, 0.9, deckWidth, STONE);
+  // Parapets (low side walls)
+  addBox(LAKE.x, BRIDGE_DECK_Y + 0.35, TRACK_Z - deckWidth/2 + 0.15, deckHalfSpan * 2, 0.6, 0.3, STONE_DARK);
+  addBox(LAKE.x, BRIDGE_DECK_Y + 0.35, TRACK_Z + deckWidth/2 - 0.15, deckHalfSpan * 2, 0.6, 0.3, STONE_DARK);
+  // Piers down into the lake
+  const pierCount = 3;
+  for (let i = 1; i <= pierCount; i++) {
+    const px = LAKE.x - deckHalfSpan + (deckHalfSpan * 2) * (i / (pierCount + 1));
+    const bottomY = WATER_Y - 4.5;
+    const pierH = (BRIDGE_DECK_Y - 0.85) - bottomY;
+    addBox(px, bottomY + pierH/2, TRACK_Z, 2.3, pierH, 3.0, STONE_DARK);
+  }
+
+  // Railway: sleepers + rails along the whole corridor (bridge + embankments)
+  const sleeperColor = [0.30, 0.20, 0.13];
+  const railColor = [0.22, 0.22, 0.24];
+  for (let x = TRACK_X_START; x <= TRACK_X_END; x += 2.1) {
+    const y = trackGradeY(x);
+    addBox(x, y + 0.07, TRACK_Z, 1.7, 0.14, 2.6, sleeperColor);
+  }
+  const railStep = 2.1;
+  for (let x = TRACK_X_START; x < TRACK_X_END; x += railStep) {
+    const x2 = Math.min(x + railStep, TRACK_X_END);
+    const y0 = trackGradeY(x) + 0.22, y1 = trackGradeY(x2) + 0.22;
+    const yMid = (y0 + y1) / 2, midLen = x2 - x;
+    addBox((x+x2)/2, yMid, RAIL_Z0, midLen, 0.16, 0.14, railColor);
+    addBox((x+x2)/2, yMid, RAIL_Z1, midLen, 0.16, 0.14, railColor);
+  }
+
+  propVao = gl.createVertexArray();
+  gl.bindVertexArray(propVao);
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(propProg.a.aPos);
+  gl.vertexAttribPointer(propProg.a.aPos, 3, gl.FLOAT, false, 0, 0);
+  const colBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(propProg.a.aColor);
+  gl.vertexAttribPointer(propProg.a.aColor, 3, gl.FLOAT, false, 0, 0);
+  propVertCount = positions.length / 3;
+}
+
+// ─────────────────────────────────────────────────────────
+//  STEAM TRAIN (object-space mesh, moved via a per-frame model matrix)
+// ─────────────────────────────────────────────────────────
+const TRAIN_SPEED = 4.2;         // world units / second
+const TRAIN_ROUTE_LEN = TRACK_X_END - TRACK_X_START - 10;
+let trainVao, trainVertCount;
+const FUNNEL_LOCAL = [2.0, 2.55, 0];
+{
+  const BOILER = [0.20, 0.20, 0.22], BOILER_DK = [0.14, 0.14, 0.16];
+  const CAB = [0.30, 0.14, 0.12], CAB_DK = [0.22, 0.10, 0.09];
+  const WHEEL = [0.08, 0.08, 0.08];
+  const TRIM = [0.75, 0.60, 0.20];
+
+  let positions = [], colors = [];
+  function addBox(cx, cy, cz, sx, sy, sz, color) {
+    const b = buildBox(cx, cy, cz, sx, sy, sz, color);
+    positions.push(...b.positions); colors.push(...b.colors);
+  }
+  // Places a Y-axis cylinder/frustum with its axis instead lying along X
+  // (front-to-back), centered at (cx,cy,cz) — used for the horizontal boiler.
+  function addFrustumAlongX(cx, cy, cz, rb, rt, h, sides, colorB, colorT) {
+    const m = buildFrustum(rb, rt, h, sides, colorB, colorT, true);
+    for (let i = 0; i < m.positions.length; i += 3) {
+      const px = m.positions[i], py = m.positions[i+1], pz = m.positions[i+2];
+      positions.push(cx + (py - h/2), cy + px, cz + pz);
+    }
+    colors.push(...m.colors);
+  }
+  // Places a Y-axis cylinder/frustum with its axis instead lying along Z
+  // (side-to-side) — used for wheels, so the disk faces sideways.
+  function addFrustumAlongZ(cx, cy, cz, rb, rt, h, sides, colorB, colorT) {
+    const m = buildFrustum(rb, rt, h, sides, colorB, colorT, true);
+    for (let i = 0; i < m.positions.length; i += 3) {
+      const px = m.positions[i], py = m.positions[i+1], pz = m.positions[i+2];
+      positions.push(cx + px, cy + pz, cz + (py - h/2));
+    }
+    colors.push(...m.colors);
+  }
+  function addFrustumUpright(cx, cy, cz, rb, rt, h, sides, colorB, colorT) {
+    const m = buildFrustum(rb, rt, h, sides, colorB, colorT, true);
+    for (let i = 0; i < m.positions.length; i += 3) {
+      positions.push(cx + m.positions[i], cy + m.positions[i+1], cz + m.positions[i+2]);
+    }
+    colors.push(...m.colors);
+  }
+
+  // Boiler (horizontal cylinder, front-to-back)
+  addFrustumAlongX(0.3, 1.55, 0, 1.05, 1.05, 4.6, 10, BOILER, BOILER);
+  // Smokebox front cap
+  addBox(3.3, 1.55, 0, 0.25, 1.9, 1.9, BOILER_DK);
+  // Funnel (upright)
+  addFrustumUpright(FUNNEL_LOCAL[0], FUNNEL_LOCAL[1], FUNNEL_LOCAL[2], 0.34, 0.30, 1.0, 10, BOILER_DK, BOILER_DK);
+  // Dome
+  addFrustumUpright(0.4, 2.6, 0, 0.42, 0.05, 0.55, 10, TRIM, TRIM);
+  // Cab
+  addBox(-2.6, 1.9, 0, 2.4, 2.6, 2.3, CAB);
+  addBox(-2.6, 3.25, 0, 2.5, 0.2, 2.4, CAB_DK); // cab roof
+  // Footplate / running board
+  addBox(-0.6, 0.55, 0, 6.6, 0.18, 2.5, CAB_DK);
+  // Cowcatcher (angled wedge, approximated with a shallow box)
+  addBox(3.65, 0.55, 0, 0.9, 0.7, 1.7, CAB_DK);
+  // Tender (coal car, behind the cab)
+  addBox(-5.1, 1.35, 0, 2.0, 1.9, 2.3, CAB);
+  addBox(-5.1, 2.25, 0, 1.7, 0.5, 2.0, [0.1,0.1,0.1]);
+  // Carriage (one, further behind)
+  addBox(-8.6, 1.55, 0, 3.4, 2.3, 2.35, [0.42,0.24,0.16]);
+  addBox(-8.6, 2.85, 0, 3.5, 0.3, 2.4, [0.30,0.17,0.12]);
+
+  // Wheels (disks: cylinder axis along Z, so the flat face points sideways)
+  function addWheel(cx, cz) {
+    addFrustumAlongZ(cx, 0.55, cz, 0.55, 0.55, 0.35, 10, WHEEL, WHEEL);
+  }
+  for (const cx of [2.2, 0.6, -1.0, -2.6]) { addWheel(cx, -1.3); addWheel(cx, 1.3); }
+  for (const cx of [-4.4, -5.8]) { addWheel(cx, -1.25); addWheel(cx, 1.25); }
+  for (const cx of [-7.4, -9.8]) { addWheel(cx, -1.25); addWheel(cx, 1.25); }
+
+  trainVao = gl.createVertexArray();
+  gl.bindVertexArray(trainVao);
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(trainProg.a.aPos);
+  gl.vertexAttribPointer(trainProg.a.aPos, 3, gl.FLOAT, false, 0, 0);
+  const colBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(trainProg.a.aColor);
+  gl.vertexAttribPointer(trainProg.a.aColor, 3, gl.FLOAT, false, 0, 0);
+  trainVertCount = positions.length / 3;
+}
+
+// ─────────────────────────────────────────────────────────
+//  STEAM PUFFS
+// ─────────────────────────────────────────────────────────
+const STEAM_COUNT = 20;
+let steamVao;
+{
+  const localQuad = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+  const quadIdx = new Uint16Array([0,1,2, 1,3,2]);
+  const phases = new Float32Array(STEAM_COUNT);
+  for (let i = 0; i < STEAM_COUNT; i++) phases[i] = i / STEAM_COUNT;
+
+  steamVao = gl.createVertexArray();
+  gl.bindVertexArray(steamVao);
+  const localBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, localBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, localQuad, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(steamProg.a.aLocal);
+  gl.vertexAttribPointer(steamProg.a.aLocal, 2, gl.FLOAT, false, 0, 0);
+
+  const phaseBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, phaseBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, phases, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(steamProg.a.aPhase);
+  gl.vertexAttribPointer(steamProg.a.aPhase, 1, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(steamProg.a.aPhase, 1);
+
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, quadIdx, gl.STATIC_DRAW);
+}
+
+// ─────────────────────────────────────────────────────────
+//  BIRDS (circling, flapping silhouettes)
+// ─────────────────────────────────────────────────────────
+const BIRD_COUNT = 9;
+let birdVao;
+{
+  // One wing pair per bird: 2 real (non-degenerate) triangles, swept back
+  // from the body. x = spanwise (0=body, ±1=tip), y = chordwise (0=leading edge).
+  const local = new Float32Array([
+    0,0,  -1,0,  -0.4,-0.6,
+    0,0,   1,0,   0.4,-0.6,
+  ]);
+  const idx = new Uint16Array([0,1,2, 3,4,5]);
+
+  const instData = new Float32Array(BIRD_COUNT * 4);
+  for (let i = 0; i < BIRD_COUNT; i++) {
+    instData[i*4]   = rand(15, 48);          // radius
+    instData[i*4+1] = rand(14, 24);          // height
+    instData[i*4+2] = rand(0.12, 0.28) * (Math.random() < 0.5 ? 1 : -1); // speed/direction
+    instData[i*4+3] = Math.random() * Math.PI * 2; // phase
+  }
+  birdVao = gl.createVertexArray();
+  gl.bindVertexArray(birdVao);
+  const localBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, localBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, local, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(birdProg.a.aLocal);
+  gl.vertexAttribPointer(birdProg.a.aLocal, 2, gl.FLOAT, false, 0, 0);
+
+  const dataBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, dataBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instData, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(birdProg.a.aInstData);
+  gl.vertexAttribPointer(birdProg.a.aInstData, 4, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(birdProg.a.aInstData, 1);
+  // aInstData must repeat per the 6 verts (3 per wing) of a single bird — but since
+  // we draw BIRD_COUNT instances of a 6-vertex bird, divisor 1 is correct: each
+  // instance draws both wings using the same per-instance flight data.
+
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+}
+
+// ─────────────────────────────────────────────────────────
+//  CLOUDS (soft drifting billboards, several dabs per cluster)
+// ─────────────────────────────────────────────────────────
+const CLOUD_COUNT = 34;
+let cloudVao;
+{
+  const localQuad = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+  const quadIdx = new Uint16Array([0,1,2, 1,3,2]);
+
+  const instPos = new Float32Array(CLOUD_COUNT * 3);
+  const instData = new Float32Array(CLOUD_COUNT * 4);
+  const clusters = 9;
+  let idxN = 0;
+  for (let c = 0; c < clusters; c++) {
+    const cx = rand(-260, 260), cz = rand(-260, 260), cy = rand(58, 92);
+    const dabs = 2 + Math.floor(Math.random() * 3);
+    const speed = rand(0.4, 1.1);
+    for (let k = 0; k < dabs && idxN < CLOUD_COUNT; k++, idxN++) {
+      instPos[idxN*3]   = cx + rand(-14, 14);
+      instPos[idxN*3+1] = cy + rand(-3, 3);
+      instPos[idxN*3+2] = cz + rand(-14, 14);
+      instData[idxN*4]   = rand(10, 20);
+      instData[idxN*4+1] = speed;
+      instData[idxN*4+2] = Math.random() * 100;
+      instData[idxN*4+3] = Math.random();
+    }
+  }
+  while (idxN < CLOUD_COUNT) {
+    instPos[idxN*3] = rand(-260,260); instPos[idxN*3+1] = rand(58,92); instPos[idxN*3+2] = rand(-260,260);
+    instData[idxN*4] = rand(10,20); instData[idxN*4+1] = rand(0.4,1.1); instData[idxN*4+2] = Math.random()*100; instData[idxN*4+3] = Math.random();
+    idxN++;
+  }
+
+  cloudVao = gl.createVertexArray();
+  gl.bindVertexArray(cloudVao);
+  const localBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, localBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, localQuad, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(cloudProg.a.aLocal);
+  gl.vertexAttribPointer(cloudProg.a.aLocal, 2, gl.FLOAT, false, 0, 0);
+
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instPos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(cloudProg.a.aInstPos);
+  gl.vertexAttribPointer(cloudProg.a.aInstPos, 3, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(cloudProg.a.aInstPos, 1);
+
+  const dataBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, dataBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, instData, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(cloudProg.a.aInstData);
+  gl.vertexAttribPointer(cloudProg.a.aInstData, 4, gl.FLOAT, false, 0, 0);
+  gl.vertexAttribDivisor(cloudProg.a.aInstData, 1);
+
+  const idxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, quadIdx, gl.STATIC_DRAW);
+}
+
+// ─────────────────────────────────────────────────────────
 //  GRAIN OVERLAY (2D canvas, CSS-composited over the WebGL canvas)
 // ─────────────────────────────────────────────────────────
 {
@@ -571,8 +1338,8 @@ let flowerVao;
 // ─────────────────────────────────────────────────────────
 //  CAMERA (orbit / pan / zoom)
 // ─────────────────────────────────────────────────────────
-const SUN_DIR = v3norm([0.55, 0.55, 0.35]);
-const FOG_COLOR = [0.93, 0.72, 0.58];
+const SUN_DIR = v3norm([0.62, 0.16, 0.24]);
+const FOG_COLOR = [0.87, 0.46, 0.34];
 
 let camTheta = 0.7, camPhi = 1.05, camRadius = 42;
 let camTarget = [0, 2, 0];
@@ -719,6 +1486,71 @@ function frame(now) {
   gl.bindVertexArray(terrainVao);
   gl.drawElements(gl.TRIANGLES, terrainIndexCount, gl.UNSIGNED_INT, 0);
 
+  // Lake water
+  gl.useProgram(waterProg.program);
+  gl.uniformMatrix4fv(waterProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(waterProg.u.uView, false, view);
+  gl.uniform3fv(waterProg.u.uCamPos, eye);
+  gl.uniform3fv(waterProg.u.uSunDir, SUN_DIR);
+  gl.uniform3fv(waterProg.u.uFogColor, FOG_COLOR);
+  gl.uniform1f(waterProg.u.uTime, time);
+  gl.bindVertexArray(waterVao);
+  gl.drawElements(gl.TRIANGLES, waterVertCount, gl.UNSIGNED_SHORT, 0);
+
+  // Trees (trunk, then swaying foliage)
+  gl.useProgram(treeProg.program);
+  gl.uniformMatrix4fv(treeProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(treeProg.u.uView, false, view);
+  gl.uniform3fv(treeProg.u.uCamPos, eye);
+  gl.uniform3fv(treeProg.u.uSunDir, SUN_DIR);
+  gl.uniform3fv(treeProg.u.uFogColor, FOG_COLOR);
+  gl.uniform1f(treeProg.u.uTime, time);
+  gl.uniform1f(treeProg.u.uSwayAmount, 0.0);
+  gl.bindVertexArray(trunkVao.vao);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, trunkVao.vertCount, treeCount);
+  gl.uniform1f(treeProg.u.uSwayAmount, 1.0);
+  gl.bindVertexArray(foliageVao.vao);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, foliageVao.vertCount, treeCount);
+
+  // Bridge + railway track
+  gl.useProgram(propProg.program);
+  gl.uniformMatrix4fv(propProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(propProg.u.uView, false, view);
+  gl.uniform3fv(propProg.u.uCamPos, eye);
+  gl.uniform3fv(propProg.u.uFogColor, FOG_COLOR);
+  gl.bindVertexArray(propVao);
+  gl.drawArrays(gl.TRIANGLES, 0, propVertCount);
+
+  // Steam train — position along the route, ping-ponging across the bridge
+  const cyclePos = (time * TRAIN_SPEED) % (TRAIN_ROUTE_LEN * 2);
+  const routeT = cyclePos < TRAIN_ROUTE_LEN ? cyclePos : (TRAIN_ROUTE_LEN * 2 - cyclePos);
+  const trainDir = cyclePos < TRAIN_ROUTE_LEN ? 1 : -1;
+  const trainX = TRACK_X_START + 5 + routeT;
+  const trainPos = [trainX, trackGradeY(trainX) + 0.55, TRACK_Z];
+  const trainHeading = trainDir > 0 ? 0 : Math.PI;
+  const thc = Math.cos(trainHeading), ths = Math.sin(trainHeading);
+  const trainModel = new Float32Array([
+    thc, 0, -ths, 0,
+    0, 1, 0, 0,
+    ths, 0, thc, 0,
+    trainPos[0], trainPos[1], trainPos[2], 1,
+  ]);
+  const funnelWorld = [
+    thc * FUNNEL_LOCAL[0] + ths * FUNNEL_LOCAL[2] + trainPos[0],
+    FUNNEL_LOCAL[1] + trainPos[1],
+    -ths * FUNNEL_LOCAL[0] + thc * FUNNEL_LOCAL[2] + trainPos[2],
+  ];
+  const forwardDir = [thc, 0, -ths];
+
+  gl.useProgram(trainProg.program);
+  gl.uniformMatrix4fv(trainProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(trainProg.u.uView, false, view);
+  gl.uniformMatrix4fv(trainProg.u.uModel, false, trainModel);
+  gl.uniform3fv(trainProg.u.uCamPos, eye);
+  gl.uniform3fv(trainProg.u.uFogColor, FOG_COLOR);
+  gl.bindVertexArray(trainVao);
+  gl.drawArrays(gl.TRIANGLES, 0, trainVertCount);
+
   // Grass
   gl.useProgram(grassProg.program);
   gl.uniformMatrix4fv(grassProg.u.uProj, false, proj);
@@ -740,6 +1572,47 @@ function frame(now) {
   gl.uniform3fv(flowerProg.u.uFogColor, FOG_COLOR);
   gl.bindVertexArray(flowerVao);
   gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, FLOWER_COUNT);
+
+  // Birds
+  gl.useProgram(birdProg.program);
+  gl.uniformMatrix4fv(birdProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(birdProg.u.uView, false, view);
+  gl.uniform3fv(birdProg.u.uCamPos, eye);
+  gl.uniform3fv(birdProg.u.uFogColor, FOG_COLOR);
+  gl.uniform1f(birdProg.u.uTime, time);
+  gl.bindVertexArray(birdVao);
+  gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, BIRD_COUNT);
+
+  // Alpha-blended layer: steam puffs + clouds
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false);
+
+  gl.useProgram(steamProg.program);
+  gl.uniformMatrix4fv(steamProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(steamProg.u.uView, false, view);
+  gl.uniform3fv(steamProg.u.uCamRight, right);
+  gl.uniform3fv(steamProg.u.uCamUp, up);
+  gl.uniform3fv(steamProg.u.uCamPos, eye);
+  gl.uniform3fv(steamProg.u.uFunnelPos, funnelWorld);
+  gl.uniform3fv(steamProg.u.uFunnelDrift, [-forwardDir[0]*0.5, 0, -forwardDir[2]*0.5]);
+  gl.uniform1f(steamProg.u.uTime, time);
+  gl.uniform3fv(steamProg.u.uFogColor, FOG_COLOR);
+  gl.bindVertexArray(steamVao);
+  gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, STEAM_COUNT);
+
+  gl.useProgram(cloudProg.program);
+  gl.uniformMatrix4fv(cloudProg.u.uProj, false, proj);
+  gl.uniformMatrix4fv(cloudProg.u.uView, false, view);
+  gl.uniform3fv(cloudProg.u.uCamRight, right);
+  gl.uniform3fv(cloudProg.u.uCamUp, up);
+  gl.uniform3fv(cloudProg.u.uCamPos, eye);
+  gl.uniform1f(cloudProg.u.uTime, time);
+  gl.bindVertexArray(cloudVao);
+  gl.drawElementsInstanced(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0, CLOUD_COUNT);
+
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
 
   requestAnimationFrame(frame);
 }
