@@ -73,14 +73,29 @@ To access it from everyone's phone, either:
 This is the one feature that isn't purely read-only: generating insights
 makes an outbound API call. Since there's no backend, it uses **your own
 Anthropic API key**, entered once on the Insights tab and stored only in
-that browser's `localStorage`. There's no server in between — the call goes
-straight from the browser to `api.anthropic.com`.
+that browser's `localStorage`.
 
-That means the key is visible in that page's network requests to anyone who
-can inspect the browser (e.g. via devtools). This is a deliberate tradeoff,
-acceptable specifically because this app is only ever shared as a private
-link with people you trust — don't reuse this pattern for anything public.
-Get a key at [console.anthropic.com](https://console.anthropic.com/settings/keys).
+Browsers can't call `api.anthropic.com` directly — it doesn't return the
+CORS headers a cross-origin `fetch()` needs, so the request has to go
+through a tiny relay first. `cloudflare-worker.js` in this folder is that
+relay: a stateless pass-through that reads the API key off each request and
+forwards it straight to Anthropic, storing nothing itself. It's about the
+smallest thing that can sit in the middle.
+
+**One-time setup (a couple of minutes, easiest on a laptop):**
+
+1. Sign up free at [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) — no credit card needed.
+2. In the dashboard: **Workers & Pages** → **Create** → **Create Worker**. Give it any name (e.g. `sleep-tracker-relay`) and click **Deploy** to create the default worker.
+3. Click **Edit code**, delete the placeholder content, and paste in the contents of `cloudflare-worker.js` from this folder. Click **Save and deploy**.
+4. Copy the worker's URL — it looks like `https://sleep-tracker-relay.<your-subdomain>.workers.dev`.
+5. Open the app's **Insights** tab, paste that URL into **Relay URL**, paste your Anthropic API key into **Anthropic API key** (get one at [console.anthropic.com](https://console.anthropic.com/settings/keys)), and tap **Save & continue**.
+
+Both values are saved only in that browser's `localStorage` — the key is
+visible in that page's network requests (to the relay, and from the relay
+on to Anthropic), since there's no backend of the app's own to hide it
+behind. This is a deliberate tradeoff, acceptable specifically because this
+app is only ever shared as a private link with people you trust — don't
+reuse this pattern for anything public.
 
 ## Limitations
 
