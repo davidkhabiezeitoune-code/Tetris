@@ -108,7 +108,15 @@ function fbm(x, y, octaves) {
   return total / sum;
 }
 function baseHeightAt(x, z) {
-  return (fbm(x*0.010, z*0.010, 4) - 0.5) * 15 + (fbm(x*0.06+50, z*0.06+50, 3) - 0.5) * 2.2;
+  // Domain-warp the sampling coordinates so the macro hills come out organic
+  // and non-repeating rather than looking like a plain noise grid.
+  const warpX = (fbm(x*0.004+11, z*0.004+7, 2) - 0.5) * 22;
+  const warpZ = (fbm(x*0.004-5, z*0.004+23, 2) - 0.5) * 22;
+  const wx = x + warpX, wz = z + warpZ;
+  const macro = (fbm(wx*0.010, wz*0.010, 4) - 0.5) * 15;
+  const meso  = (fbm(x*0.05+50, z*0.05+50, 3) - 0.5) * 3.0;
+  const micro = (fbm(x*0.22+150, z*0.22+150, 3) - 0.5) * 0.9;
+  return macro + meso + micro;
 }
 function smoothstepJS(e0, e1, x) {
   const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
@@ -358,13 +366,36 @@ void main() {
 const WATER_VS = `#version 300 es
 in vec3 aPos;
 out vec3 vWorldPos;
+out vec3 vNormal;
 out float vDist;
 uniform mat4 uProj, uView;
 uniform vec3 uCamPos;
 uniform float uTime;
+
+// Sum-of-sines wave field: returns (height, dHeight/dx, dHeight/dz) so the
+// surface normal can be derived analytically instead of staying flat.
+vec3 waveField(vec2 p, float t) {
+  vec2 dirs[5] = vec2[5](vec2(1.0,0.15), vec2(-0.55,0.83), vec2(0.32,-0.94), vec2(0.86,0.51), vec2(-0.78,-0.63));
+  float freqs[5]  = float[5](0.16, 0.24, 0.37, 0.55, 0.81);
+  float amps[5]   = float[5](0.11, 0.07, 0.04, 0.022, 0.012);
+  float speeds[5] = float[5](0.9, 1.25, 1.6, 2.05, 2.5);
+  float h = 0.0, dx = 0.0, dz = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec2 d = normalize(dirs[i]);
+    float phase = (d.x*p.x + d.y*p.y) * freqs[i] + t * speeds[i];
+    float s = sin(phase), c = cos(phase);
+    h += amps[i] * s;
+    dx += amps[i] * freqs[i] * d.x * c;
+    dz += amps[i] * freqs[i] * d.y * c;
+  }
+  return vec3(h, dx, dz);
+}
+
 void main() {
   vec3 p = aPos;
-  p.y += sin(p.x * 0.22 + uTime * 1.1) * 0.05 + cos(p.z * 0.18 - uTime * 0.8) * 0.04;
+  vec3 w = waveField(p.xz, uTime);
+  p.y += w.x;
+  vNormal = normalize(vec3(-w.y, 1.0, -w.z));
   vWorldPos = p;
   vDist = distance(p, uCamPos);
   gl_Position = uProj * uView * vec4(p, 1.0);
@@ -374,6 +405,7 @@ void main() {
 const WATER_FS = `#version 300 es
 precision highp float;
 in vec3 vWorldPos;
+in vec3 vNormal;
 in float vDist;
 out vec4 outColor;
 uniform vec3 uCamPos;
@@ -382,8 +414,9 @@ uniform vec3 uFogColor;
 uniform float uTime;
 ${NOISE_GLSL}
 void main() {
+  vec3 N = normalize(vNormal);
   vec3 viewDir = normalize(uCamPos - vWorldPos);
-  float fresnel = pow(1.0 - clamp(viewDir.y, 0.0, 1.0), 3.0);
+  float fresnel = pow(1.0 - clamp(dot(viewDir, N), 0.0, 1.0), 3.0);
   vec3 deep = vec3(0.04, 0.14, 0.20);
   vec3 shallow = vec3(0.14, 0.30, 0.30);
   vec3 col = mix(deep, shallow, fresnel);
@@ -391,11 +424,14 @@ void main() {
   vec3 skyTint = vec3(0.80, 0.46, 0.36);
   col = mix(col, skyTint, fresnel * 0.6);
 
-  vec2 rp = vWorldPos.xz * 3.0 + vec2(uTime * 0.6, uTime * 0.4);
+  // Wave-crest specular (moves with the real wave normal) plus a fine
+  // noise-perturbed twinkle so the glitter isn't perfectly smooth.
+  vec2 rp = vWorldPos.xz * 4.0 + vec2(uTime * 0.8, uTime * 0.55);
   float n = noiseG(rp);
-  vec3 reflectDir = reflect(-viewDir, vec3(0.0, 1.0, 0.0));
-  float spec = pow(max(dot(reflectDir, uSunDir), 0.0), 50.0);
-  col += vec3(1.0, 0.72, 0.48) * spec * smoothstep(0.5, 0.9, n) * 2.4;
+  vec3 reflectDir = reflect(-viewDir, N);
+  float spec = pow(max(dot(reflectDir, uSunDir), 0.0), 42.0);
+  float twinkle = smoothstep(0.45, 0.95, n);
+  col += vec3(1.0, 0.72, 0.48) * spec * (0.5 + twinkle * 1.8) * 2.2;
 
   float fog = (1.0 - exp(-0.00006 * vDist * vDist)) * 0.82;
   col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));
@@ -492,22 +528,30 @@ void main() {
 }
 `;
 
-// ── Steam puffs (billboard particles rising from the funnel) ──
+// ── Steam puffs (billboard particles rising from the funnel, with turbulence) ──
 const STEAM_VS = `#version 300 es
 in vec2 aLocal;
 in float aPhase;
 out vec2 vLocal;
 out float vAge;
+out float vSeed;
 out float vDist;
 uniform mat4 uProj, uView;
 uniform vec3 uCamRight, uCamUp, uCamPos;
 uniform vec3 uFunnelPos, uFunnelDrift;
 uniform float uTime;
 void main() {
-  float age = fract(uTime * 0.35 + aPhase);
+  float age = fract(uTime * 0.3 + aPhase);
   vAge = age;
-  float size = mix(0.25, 1.6, age);
-  vec3 base = uFunnelPos + uFunnelDrift * age * 6.0 + vec3(0.0, age * 5.0, 0.0);
+  vSeed = aPhase;
+  float size = mix(0.22, 2.4, pow(age, 0.55));
+  // Turbulent rise: a couple of offset sine wobbles instead of a straight line,
+  // growing with age so the plume billows rather than travelling in a rigid arc.
+  float wobX = (sin(age * 13.0 + aPhase * 41.0) * 0.5 + sin(age * 5.0 + aPhase * 17.0) * 0.5) * age;
+  float wobZ = (cos(age * 11.0 + aPhase * 29.0) * 0.5 + sin(age * 6.5 + aPhase * 23.0) * 0.5) * age;
+  vec3 base = uFunnelPos
+    + uFunnelDrift * age * 7.5
+    + vec3(wobX * 1.1, pow(age, 0.75) * 6.5, wobZ * 1.1);
   vec3 worldPos = base + uCamRight * (aLocal.x * size) + uCamUp * (aLocal.y * size);
   vLocal = aLocal;
   vDist = distance(worldPos, uCamPos);
@@ -519,14 +563,25 @@ const STEAM_FS = `#version 300 es
 precision highp float;
 in vec2 vLocal;
 in float vAge;
+in float vSeed;
 in float vDist;
 out vec4 outColor;
 uniform vec3 uFogColor;
+float hashS(vec2 p) { return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
 void main() {
   float d = length(vLocal);
-  if (d > 1.0) discard;
-  float alpha = smoothstep(1.0, 0.3, d) * smoothstep(0.0, 0.12, vAge) * smoothstep(1.0, 0.55, vAge) * 0.55;
-  vec3 col = mix(vec3(0.95, 0.93, 0.90), uFogColor, 0.15);
+  if (d > 1.05) discard;
+  // Fluffy, irregular edge instead of a perfect disc — offset a couple of
+  // extra "lobes" so the silhouette reads as a cloud puff, not a circle.
+  vec2 p = vLocal;
+  float lobes = hashS(floor(p * 2.2) + vSeed * 13.0);
+  float edgeR = 0.55 + lobes * 0.16;
+  float shape = smoothstep(1.0, edgeR, d + (lobes - 0.5) * 0.18);
+  float lifeFade = smoothstep(0.0, 0.10, vAge) * smoothstep(1.0, 0.5, vAge);
+  float alpha = shape * lifeFade * 0.55;
+  vec3 warm = vec3(1.0, 0.86, 0.70);
+  vec3 cool = mix(vec3(0.90, 0.89, 0.90), uFogColor, 0.25);
+  vec3 col = mix(warm, cool, smoothstep(0.05, 0.65, vAge));
   outColor = vec4(col, alpha);
 }
 `;
@@ -577,7 +632,12 @@ uniform mat4 uProj, uView;
 uniform vec3 uCamRight, uCamUp, uCamPos;
 uniform float uTime;
 void main() {
-  vec3 pos = aInstPos + vec3(uTime * aInstData.y, 0.0, uTime * aInstData.y * 0.3);
+  // Wrap drift within a fixed range so clouds cycle back around forever
+  // instead of eventually drifting out of the world and vanishing.
+  const float range = 640.0;
+  float wx = mod(aInstPos.x + uTime * aInstData.y + range * 0.5, range) - range * 0.5;
+  float wz = mod(aInstPos.z + uTime * aInstData.y * 0.35 + range * 0.5, range) - range * 0.5;
+  vec3 pos = vec3(wx, aInstPos.y, wz);
   vec3 worldPos = pos + uCamRight * (aLocal.x * aInstData.x) + uCamUp * (aLocal.y * aInstData.x * 0.6);
   vLocal = aLocal;
   vTint = aInstData.w;
@@ -1184,7 +1244,7 @@ const FUNNEL_LOCAL = [2.0, 2.55, 0];
 // ─────────────────────────────────────────────────────────
 //  STEAM PUFFS
 // ─────────────────────────────────────────────────────────
-const STEAM_COUNT = 20;
+const STEAM_COUNT = 36;
 let steamVao;
 {
   const localQuad = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
@@ -1272,7 +1332,7 @@ let cloudVao;
   for (let c = 0; c < clusters; c++) {
     const cx = rand(-260, 260), cz = rand(-260, 260), cy = rand(58, 92);
     const dabs = 2 + Math.floor(Math.random() * 3);
-    const speed = rand(0.4, 1.1);
+    const speed = rand(1.4, 3.2);
     for (let k = 0; k < dabs && idxN < CLOUD_COUNT; k++, idxN++) {
       instPos[idxN*3]   = cx + rand(-14, 14);
       instPos[idxN*3+1] = cy + rand(-3, 3);
@@ -1285,7 +1345,7 @@ let cloudVao;
   }
   while (idxN < CLOUD_COUNT) {
     instPos[idxN*3] = rand(-260,260); instPos[idxN*3+1] = rand(58,92); instPos[idxN*3+2] = rand(-260,260);
-    instData[idxN*4] = rand(10,20); instData[idxN*4+1] = rand(0.4,1.1); instData[idxN*4+2] = Math.random()*100; instData[idxN*4+3] = Math.random();
+    instData[idxN*4] = rand(10,20); instData[idxN*4+1] = rand(1.4,3.2); instData[idxN*4+2] = Math.random()*100; instData[idxN*4+3] = Math.random();
     idxN++;
   }
 
