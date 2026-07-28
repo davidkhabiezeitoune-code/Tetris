@@ -57,14 +57,30 @@ To access it from everyone's phone, either:
 
 - **Live read** from the Sheet — polls every ~30s, no login.
 - Charts: settle time per session, average settle time by type, who settles
-  which events, night wake-ups by day, common settling techniques (extracted
-  from the "how he settled" text).
+  which events, night wake-ups by day, typical time of day per event type,
+  common settling techniques (extracted from the "how he settled" text).
 - KPI tiles: sessions logged, average settle time, night wake-ups in the last
   7 days, most active carer.
 - Filter by date range, event type, carer, or free-text search.
 - Sortable session table.
 - CSV export of the parsed data.
 - Light/dark theme (follows system, or toggle manually).
+- **AI Insights tab** — sends a summary of the log directly to Claude
+  (Anthropic's AI) from the browser and shows back patterns and suggestions.
+
+### AI Insights — how it works, and the tradeoff
+
+This is the one feature that isn't purely read-only: generating insights
+makes an outbound API call. Since there's no backend, it uses **your own
+Anthropic API key**, entered once on the Insights tab and stored only in
+that browser's `localStorage`. There's no server in between — the call goes
+straight from the browser to `api.anthropic.com`.
+
+That means the key is visible in that page's network requests to anyone who
+can inspect the browser (e.g. via devtools). This is a deliberate tradeoff,
+acceptable specifically because this app is only ever shared as a private
+link with people you trust — don't reuse this pattern for anything public.
+Get a key at [console.anthropic.com](https://console.anthropic.com/settings/keys).
 
 ## Limitations
 
