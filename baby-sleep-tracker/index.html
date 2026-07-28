@@ -1998,7 +1998,7 @@
         },
         body: JSON.stringify({
           model: CLAUDE_MODEL,
-          max_tokens: 1500,
+          max_tokens: 6000,
           thinking: { type: "adaptive" },
           system: "You are a warm, practical infant-sleep analyst helping tired parents understand their own logged data. " +
             "Write 3-5 short sections, each starting with a **bold heading**, using '- ' bullet points for specifics. " +
@@ -2014,7 +2014,10 @@
         throw new Error((json && json.error && json.error.message) || ("HTTP " + res.status));
       }
       var text = (json.content || []).filter(function (b) { return b.type === "text"; }).map(function (b) { return b.text; }).join("\n\n");
-      if (!text) throw new Error("Empty response from Claude.");
+      if (!text) {
+        if (json.stop_reason === "max_tokens") throw new Error("Response was cut off before any text was written (ran out of tokens while thinking) — try again.");
+        throw new Error("Empty response from Claude.");
+      }
 
       var record = { text: text, generatedAt: Date.now(), sessionCount: sessions.length };
       localStorage.setItem(LAST_INSIGHTS_KEY, JSON.stringify(record));
