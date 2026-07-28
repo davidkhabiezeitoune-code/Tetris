@@ -68,9 +68,19 @@ function mat4Perspective(fovy, aspect, near, far) {
 }
 
 function v3sub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function v3add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function v3scale(a, s) { return [a[0]*s, a[1]*s, a[2]*s]; }
 function v3cross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
 function v3norm(a) { const l = Math.hypot(a[0],a[1],a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; }
 function v3dot(a, b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 function mat4LookAt(eye, center, up) {
   const z = v3norm(v3sub(eye, center));
@@ -123,18 +133,35 @@ function smoothstepJS(e0, e1, x) {
   return t * t * (3 - 2 * t);
 }
 
-// ── Lake basin (elongated ellipse, carved into the terrain) ──
-const LAKE = { x: 24, z: 6, halfWidth: 13, halfLength: 40, depth: 7 };
+// ── Lake basin (irregular natural shoreline, carved into the terrain) ──
+const LAKE = { x: 26, z: 8, halfWidth: 20, halfLength: 60, depth: 8.5 };
+// Per-angle shoreline radius multiplier: a few sine harmonics plus fbm noise
+// sampled around a circle, so the coastline reads as an irregular natural
+// lake (bays, points) rather than a perfect ellipse. Shared by the terrain
+// carve, the water mesh boundary, and the bridge span so everything lines up.
+function lakeShoreFactor(angle) {
+  let f = 1.0
+    + 0.17 * Math.sin(angle * 2.0 + 1.3)
+    + 0.12 * Math.sin(angle * 3.1 + 2.6)
+    + 0.08 * Math.sin(angle * 5.3 + 0.5)
+    + 0.05 * Math.sin(angle * 7.7 + 4.1);
+  f += (fbm(Math.cos(angle) * 2.5 + 71, Math.sin(angle) * 2.5 + 71, 3) - 0.5) * 0.24;
+  return Math.max(0.55, f);
+}
 function lakeMask(x, z) {
   const dx = (x - LAKE.x) / LAKE.halfWidth, dz = (z - LAKE.z) / LAKE.halfLength;
-  const d = Math.hypot(dx, dz);
-  return 1 - smoothstepJS(0.62, 1.0, d); // 1 at center, 0 at/after the shore
+  const angle = Math.atan2(dz, dx);
+  const shoreF = lakeShoreFactor(angle);
+  const d = Math.hypot(dx, dz) / shoreF;
+  return 1 - smoothstepJS(0.60, 1.0, d); // 1 at center, 0 at/after the shore
 }
 
 // ── Railway grade: a gentle corridor flattened toward a graded line ──
 const TRACK_Z = LAKE.z;
 const TRACK_X_START = -85, TRACK_X_END = 100;
-const BRIDGE_X0 = LAKE.x - LAKE.halfWidth - 3, BRIDGE_X1 = LAKE.x + LAKE.halfWidth + 3;
+const LAKE_SHORE_EAST = LAKE.halfWidth * lakeShoreFactor(0);
+const LAKE_SHORE_WEST = LAKE.halfWidth * lakeShoreFactor(Math.PI);
+const BRIDGE_X0 = LAKE.x - LAKE_SHORE_WEST - 3, BRIDGE_X1 = LAKE.x + LAKE_SHORE_EAST + 3;
 const BRIDGE_DECK_Y = Math.max(baseHeightAt(BRIDGE_X0, TRACK_Z), baseHeightAt(BRIDGE_X1, TRACK_Z)) + 2.6;
 const TRACK_Y_START = baseHeightAt(TRACK_X_START, TRACK_Z);
 const TRACK_Y_END = baseHeightAt(TRACK_X_END, TRACK_Z);
@@ -376,9 +403,9 @@ uniform float uTime;
 // surface normal can be derived analytically instead of staying flat.
 vec3 waveField(vec2 p, float t) {
   vec2 dirs[5] = vec2[5](vec2(1.0,0.15), vec2(-0.55,0.83), vec2(0.32,-0.94), vec2(0.86,0.51), vec2(-0.78,-0.63));
-  float freqs[5]  = float[5](0.16, 0.24, 0.37, 0.55, 0.81);
-  float amps[5]   = float[5](0.11, 0.07, 0.04, 0.022, 0.012);
-  float speeds[5] = float[5](0.9, 1.25, 1.6, 2.05, 2.5);
+  float freqs[5]  = float[5](0.095, 0.15, 0.26, 0.42, 0.66);
+  float amps[5]   = float[5](0.38, 0.22, 0.12, 0.055, 0.026);
+  float speeds[5] = float[5](0.75, 1.05, 1.4, 1.85, 2.35);
   float h = 0.0, dx = 0.0, dz = 0.0;
   for (int i = 0; i < 5; i++) {
     vec2 d = normalize(dirs[i]);
@@ -444,13 +471,14 @@ const TREE_VS = `#version 300 es
 in vec3 aLocal;
 in vec3 aNormal;
 in vec3 aColorBase;
+in float aSway;       // 0 at the tree's base, rising toward branch tips
 in vec3 aInstPos;
-in vec3 aInstData; // scale, rotationY, phase
+in vec4 aInstData;    // scale, rotationY, phase, swayMul (small trees sway more)
 out vec3 vColor;
 out float vDist;
 uniform mat4 uProj, uView;
 uniform vec3 uCamPos, uSunDir;
-uniform float uTime, uSwayAmount;
+uniform float uTime;
 ${NOISE_GLSL}
 void main() {
   float ca = cos(aInstData.y), sa = sin(aInstData.y);
@@ -459,9 +487,10 @@ void main() {
   vec3 normRot = vec3(aNormal.x*ca - aNormal.z*sa, aNormal.y, aNormal.x*sa + aNormal.z*ca);
   vec3 worldPos = aInstPos + rotated;
 
-  vec2 wind = windAt(aInstPos.xz + aInstData.z * 3.0, uTime) * 0.4;
-  worldPos.x += wind.x * uSwayAmount;
-  worldPos.z += wind.y * uSwayAmount;
+  vec2 wind = windAt(aInstPos.xz + aInstData.z * 3.0, uTime) * 0.42;
+  float sway = aSway * aInstData.w;
+  worldPos.x += wind.x * sway;
+  worldPos.z += wind.y * sway;
 
   float diffuse = max(dot(normalize(normRot), uSunDir), 0.0);
   float lightF = diffuse * 0.55 + 0.5;
@@ -697,8 +726,8 @@ const flowerProg = locs(createProgram(FLOWER_VS, FLOWER_FS),
 const waterProg = locs(createProgram(WATER_VS, WATER_FS),
   ['uProj','uView','uCamPos','uSunDir','uFogColor','uTime'], ['aPos']);
 const treeProg = locs(createProgram(TREE_VS, TREE_FS),
-  ['uProj','uView','uCamPos','uSunDir','uTime','uSwayAmount','uFogColor'],
-  ['aLocal','aNormal','aColorBase','aInstPos','aInstData']);
+  ['uProj','uView','uCamPos','uSunDir','uTime','uFogColor'],
+  ['aLocal','aNormal','aColorBase','aSway','aInstPos','aInstData']);
 const propProg = locs(createProgram(PROP_VS, PROP_FS),
   ['uProj','uView','uCamPos','uFogColor'], ['aPos','aColor']);
 const trainProg = locs(createProgram(TRAIN_VS, PROP_FS),
@@ -727,6 +756,7 @@ gl.vertexAttribPointer(skyProg.a.aPos, 2, gl.FLOAT, false, 0, 0);
 const WORLD_HALF = 150;
 const GRID_N = 120;
 function rand(a, b) { return a + Math.random() * (b - a); }
+function lerp(a, b, t) { return a + t * (b - a); }
 
 let terrainVao, terrainIndexCount;
 {
@@ -991,18 +1021,43 @@ function buildBox(cx, cy, cz, sx, sy, sz, color) {
 // ─────────────────────────────────────────────────────────
 let waterVao, waterVertCount, WATER_Y;
 {
-  const shoreA = heightAt(LAKE.x + LAKE.halfWidth * 0.9, LAKE.z);
-  const shoreB = heightAt(LAKE.x, LAKE.z + LAKE.halfLength * 0.9);
-  WATER_Y = Math.min(shoreA, shoreB) - 0.3;
+  const shoreSamples = 10;
+  let minShore = Infinity;
+  for (let i = 0; i < shoreSamples; i++) {
+    const angle = (i / shoreSamples) * Math.PI * 2;
+    const shoreF = lakeShoreFactor(angle) * 0.94;
+    const sx = LAKE.x + Math.cos(angle) * LAKE.halfWidth * shoreF;
+    const sz = LAKE.z + Math.sin(angle) * LAKE.halfLength * shoreF;
+    minShore = Math.min(minShore, heightAt(sx, sz));
+  }
+  WATER_Y = minShore - 0.55;
 
-  const segs = 56;
-  const positions = [WATER_Y === WATER_Y ? LAKE.x : LAKE.x, WATER_Y, LAKE.z];
-  for (let i = 0; i <= segs; i++) {
-    const t = (i / segs) * Math.PI * 2;
-    positions.push(LAKE.x + Math.cos(t) * LAKE.halfWidth * 0.93, WATER_Y, LAKE.z + Math.sin(t) * LAKE.halfLength * 0.93);
+  // Radial grid (center + concentric rings) so the wave field has enough
+  // interior resolution, and the boundary naturally follows the irregular
+  // per-angle shoreline instead of a plain ellipse fan.
+  const segs = 80;
+  const ringTs = [0.14, 0.30, 0.47, 0.63, 0.78, 0.90, 0.97];
+  const positions = [LAKE.x, WATER_Y, LAKE.z];
+  const ringStarts = [];
+  for (let r = 0; r < ringTs.length; r++) {
+    ringStarts.push(positions.length / 3);
+    const t = ringTs[r];
+    for (let i = 0; i <= segs; i++) {
+      const angle = (i / segs) * Math.PI * 2;
+      const shoreF = lakeShoreFactor(angle) * 0.94;
+      const rw = LAKE.halfWidth * t * shoreF, rl = LAKE.halfLength * t * shoreF;
+      positions.push(LAKE.x + Math.cos(angle) * rw, WATER_Y, LAKE.z + Math.sin(angle) * rl);
+    }
   }
   const idx = [];
-  for (let i = 1; i <= segs; i++) idx.push(0, i, i+1);
+  for (let i = 0; i < segs; i++) idx.push(0, ringStarts[0]+i, ringStarts[0]+i+1);
+  for (let r = 0; r < ringTs.length - 1; r++) {
+    const a0 = ringStarts[r], a1 = ringStarts[r+1];
+    for (let i = 0; i < segs; i++) {
+      idx.push(a0+i, a1+i, a1+i+1);
+      idx.push(a0+i, a1+i+1, a0+i+1);
+    }
+  }
 
   waterVao = gl.createVertexArray();
   gl.bindVertexArray(waterVao);
@@ -1018,19 +1073,96 @@ let waterVao, waterVertCount, WATER_Y;
 }
 
 // ─────────────────────────────────────────────────────────
-//  TREES (instanced trunk + swaying foliage)
+//  TREES — procedurally-branched variants, instanced
 // ─────────────────────────────────────────────────────────
-const TRUNK_MESH = buildFrustum(0.30, 0.19, 1.75, 7, [0.28,0.19,0.11], [0.34,0.24,0.15], false);
-const FOLIAGE_MESH = mergeMeshes([
-  { mesh: buildFrustum(1.35, 0.05, 2.6, 8, [0.09,0.26,0.10], [0.20,0.40,0.15], true), offset: [0,1.35,0] },
-  { mesh: buildFrustum(1.05, 0.05, 2.2, 8, [0.11,0.30,0.11], [0.24,0.44,0.17], true), offset: [0,2.75,0] },
-  { mesh: buildFrustum(0.72, 0.02, 1.7, 8, [0.14,0.34,0.13], [0.28,0.48,0.19], true), offset: [0,3.95,0] },
-]);
+// Builds a tapered "branch" segment between two arbitrary 3D points (not just
+// vertical), so recursive branching can point in any direction.
+function frustumBetween(p0, p1, r0, r1, sides, color0, color1) {
+  const dir = v3norm(v3sub(p1, p0));
+  const upRef = Math.abs(dir[1]) < 0.95 ? [0,1,0] : [1,0,0];
+  const right = v3norm(v3cross(upRef, dir));
+  const up2 = v3cross(dir, right);
+  const positions = [], normals = [], colors = [];
+  const ring = (p, r, ca, sa) => v3add(p, v3add(v3scale(right, ca*r), v3scale(up2, sa*r)));
+  for (let i = 0; i < sides; i++) {
+    const a0 = (i/sides)*Math.PI*2, a1 = ((i+1)/sides)*Math.PI*2;
+    const ca0=Math.cos(a0), sa0=Math.sin(a0), ca1=Math.cos(a1), sa1=Math.sin(a1);
+    const amid=(a0+a1)/2, nrm = v3norm(v3add(v3scale(right,Math.cos(amid)), v3scale(up2,Math.sin(amid))));
+    const p00=ring(p0,r0,ca0,sa0), p01=ring(p0,r0,ca1,sa1), p10=ring(p1,r1,ca0,sa0), p11=ring(p1,r1,ca1,sa1);
+    positions.push(...p00,...p01,...p11, ...p00,...p11,...p10);
+    for (let k=0;k<6;k++) normals.push(...nrm);
+    colors.push(...color0,...color0,...color1, ...color0,...color1,...color1);
+  }
+  return { positions, normals, colors };
+}
+// Tilts 'dir' away from itself by 'tilt' radians, spread around it by 'spread'.
+function tiltDir(dir, tilt, spread) {
+  const upRef = Math.abs(dir[1]) < 0.95 ? [0,1,0] : [1,0,0];
+  const right = v3norm(v3cross(upRef, dir));
+  const up2 = v3cross(dir, right);
+  const lateral = v3add(v3scale(right, Math.cos(spread)), v3scale(up2, Math.sin(spread)));
+  return v3norm(v3add(v3scale(dir, Math.cos(tilt)), v3scale(lateral, Math.sin(tilt))));
+}
+// Procedurally grows one tree: a trunk that recursively forks into thinner
+// branches, ending in small leaf clumps — genuinely self-similar/"fractal"
+// rather than a fixed stacked-cone shape, and different every seed.
+function genTreeVariant(seed) {
+  const rng = mulberry32(seed);
+  const positions = [], normals = [], colors = [];
+  const barkA = [0.23+rng()*0.07, 0.15+rng()*0.05, 0.09+rng()*0.03];
+  const barkB = [barkA[0]*1.3, barkA[1]*1.35, barkA[2]*1.3];
+  const leafA = [0.07+rng()*0.06, 0.20+rng()*0.10, 0.07+rng()*0.05];
+  const leafB = [leafA[0]+0.16, leafA[1]+0.22, leafA[2]+0.11];
 
-const TREE_COUNT = 240;
-let treeCount, trunkVao, foliageVao;
+  function addMesh(m) { positions.push(...m.positions); normals.push(...m.normals); colors.push(...m.colors); }
+  function addFoliage(center, radius) {
+    const lobes = 2 + Math.floor(rng()*3);
+    for (let i = 0; i < lobes; i++) {
+      const r = radius * (0.5 + rng()*0.55), h = radius * (1.1 + rng()*1.0);
+      const off = [(rng()-0.5)*radius*0.9, rng()*radius*0.35, (rng()-0.5)*radius*0.9];
+      const m = buildFrustum(r, r*0.04, h, 6, leafA, leafB, true);
+      for (let k = 0; k < m.positions.length; k += 3) {
+        positions.push(center[0]+off[0]+m.positions[k], center[1]+off[1]+m.positions[k+1], center[2]+off[2]+m.positions[k+2]);
+      }
+      normals.push(...m.normals);
+      colors.push(...m.colors);
+    }
+  }
+  const maxDepth = rng() < 0.45 ? 2 : 3;
+  function grow(start, dir, length, radius, depth) {
+    const end = v3add(start, v3scale(dir, length));
+    addMesh(frustumBetween(start, end, radius, radius*0.6, 6, barkA, barkB));
+    if (depth >= maxDepth || radius < 0.045) {
+      addFoliage(end, Math.max(0.6, radius*4.6));
+      return;
+    }
+    const branches = 2 + Math.floor(rng()*2);
+    for (let i = 0; i < branches; i++) {
+      const tilt = 0.4 + rng()*0.45;
+      const spread = (i/branches)*Math.PI*2 + rng()*1.3;
+      const newDir = tiltDir(dir, tilt, spread);
+      grow(end, newDir, length*(0.6+rng()*0.14), radius*0.58, depth+1);
+    }
+  }
+  const trunkHeight = 1.5 + rng()*1.3;
+  const trunkRadius = 0.20 + rng()*0.11;
+  grow([0,0,0], [0,1,0], trunkHeight, trunkRadius, 0);
+
+  // Sway weight rises with height above ground (0 at the roots, 1 at the
+  // tallest point) so wind bends the canopy/branch tips, not the base.
+  let maxY = 0.01;
+  for (let i = 1; i < positions.length; i += 3) if (positions[i] > maxY) maxY = positions[i];
+  const sway = new Float32Array(positions.length / 3);
+  for (let i = 0; i < sway.length; i++) sway[i] = Math.pow(Math.max(0, Math.min(1, positions[i*3+1] / maxY)), 1.5);
+
+  return { positions: new Float32Array(positions), normals: new Float32Array(normals), colors: new Float32Array(colors), sway, height: maxY };
+}
+
+const TREE_VARIANTS = [1337, 91827, 4242, 60210, 777, 15990].map(genTreeVariant);
+const TREE_COUNT = 260;
+let treeCount, treeVaos;
 {
-  const instPos = [], instData = [];
+  const buckets = TREE_VARIANTS.map(() => ({ instPos: [], instData: [] }));
   let n = 0, guard = 0;
   while (n < TREE_COUNT && guard < TREE_COUNT * 40) {
     guard++;
@@ -1039,34 +1171,46 @@ let treeCount, trunkVao, foliageVao;
     if (distC < 42 && Math.random() > 0.05) continue;
     if (blockedByLakeOrTrack(x, z)) continue;
     if (lakeMask(x, z) > 0.02) continue;
-    instPos.push(x, heightAt(x, z), z);
-    instData.push(rand(0.85, 1.35), Math.random() * Math.PI * 2, Math.random() * 100);
+    const variant = Math.floor(Math.random() * TREE_VARIANTS.length);
+    const scale = rand(0.55, 1.6);
+    // Small (young) trees are far more flexible and sway noticeably more,
+    // including their "trunk"; big mature trees stay rigid and only their
+    // canopy tips move gently.
+    const t = smoothstepJS(0.55, 1.6, scale);
+    const swayMul = lerp(2.4, 0.35, t);
+    const b = buckets[variant];
+    b.instPos.push(x, heightAt(x, z), z);
+    b.instData.push(scale, Math.random() * Math.PI * 2, Math.random() * 100, swayMul);
     n++;
   }
   treeCount = n;
-  const instPosArr = new Float32Array(instPos);
-  const instDataArr = new Float32Array(instData);
 
-  function makeTreeVao(mesh) {
+  function makeTreeVao(mesh, instPosArr, instDataArr) {
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     const posBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.positions), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(treeProg.a.aLocal);
     gl.vertexAttribPointer(treeProg.a.aLocal, 3, gl.FLOAT, false, 0, 0);
 
     const normBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.normals), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(treeProg.a.aNormal);
     gl.vertexAttribPointer(treeProg.a.aNormal, 3, gl.FLOAT, false, 0, 0);
 
     const colBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.colors), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.colors, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(treeProg.a.aColorBase);
     gl.vertexAttribPointer(treeProg.a.aColorBase, 3, gl.FLOAT, false, 0, 0);
+
+    const swayBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, swayBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.sway, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(treeProg.a.aSway);
+    gl.vertexAttribPointer(treeProg.a.aSway, 1, gl.FLOAT, false, 0, 0);
 
     const ipBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, ipBuf);
@@ -1079,13 +1223,14 @@ let treeCount, trunkVao, foliageVao;
     gl.bindBuffer(gl.ARRAY_BUFFER, idBuf);
     gl.bufferData(gl.ARRAY_BUFFER, instDataArr, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(treeProg.a.aInstData);
-    gl.vertexAttribPointer(treeProg.a.aInstData, 3, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(treeProg.a.aInstData, 4, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(treeProg.a.aInstData, 1);
 
-    return { vao, vertCount: mesh.positions.length / 3 };
+    return { vao, vertCount: mesh.positions.length / 3, instCount: instPosArr.length / 3 };
   }
-  trunkVao = makeTreeVao(TRUNK_MESH);
-  foliageVao = makeTreeVao(FOLIAGE_MESH);
+
+  treeVaos = TREE_VARIANTS.map((mesh, i) => makeTreeVao(mesh, new Float32Array(buckets[i].instPos), new Float32Array(buckets[i].instData)))
+    .filter(v => v.instCount > 0);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1096,7 +1241,8 @@ let propVao, propVertCount;
   const STONE = [0.56, 0.52, 0.48];
   const STONE_DARK = [0.42, 0.39, 0.36];
   const RAIL_Z0 = TRACK_Z - 0.7, RAIL_Z1 = TRACK_Z + 0.7;
-  const deckHalfSpan = LAKE.halfWidth + 4;
+  const deckCenterX = (BRIDGE_X0 + BRIDGE_X1) / 2;
+  const deckHalfSpan = (BRIDGE_X1 - BRIDGE_X0) / 2;
   const deckWidth = 7.5;
 
   let positions = [], colors = [];
@@ -1106,15 +1252,15 @@ let propVao, propVertCount;
   }
 
   // Bridge deck
-  addBox(LAKE.x, BRIDGE_DECK_Y - 0.4, TRACK_Z, deckHalfSpan * 2, 0.9, deckWidth, STONE);
+  addBox(deckCenterX, BRIDGE_DECK_Y - 0.4, TRACK_Z, deckHalfSpan * 2, 0.9, deckWidth, STONE);
   // Parapets (low side walls)
-  addBox(LAKE.x, BRIDGE_DECK_Y + 0.35, TRACK_Z - deckWidth/2 + 0.15, deckHalfSpan * 2, 0.6, 0.3, STONE_DARK);
-  addBox(LAKE.x, BRIDGE_DECK_Y + 0.35, TRACK_Z + deckWidth/2 - 0.15, deckHalfSpan * 2, 0.6, 0.3, STONE_DARK);
+  addBox(deckCenterX, BRIDGE_DECK_Y + 0.35, TRACK_Z - deckWidth/2 + 0.15, deckHalfSpan * 2, 0.6, 0.3, STONE_DARK);
+  addBox(deckCenterX, BRIDGE_DECK_Y + 0.35, TRACK_Z + deckWidth/2 - 0.15, deckHalfSpan * 2, 0.6, 0.3, STONE_DARK);
   // Piers down into the lake
-  const pierCount = 3;
+  const pierCount = 5;
   for (let i = 1; i <= pierCount; i++) {
-    const px = LAKE.x - deckHalfSpan + (deckHalfSpan * 2) * (i / (pierCount + 1));
-    const bottomY = WATER_Y - 4.5;
+    const px = deckCenterX - deckHalfSpan + (deckHalfSpan * 2) * (i / (pierCount + 1));
+    const bottomY = WATER_Y - 5.5;
     const pierH = (BRIDGE_DECK_Y - 0.85) - bottomY;
     addBox(px, bottomY + pierH/2, TRACK_Z, 2.3, pierH, 3.0, STONE_DARK);
   }
@@ -1557,7 +1703,7 @@ function frame(now) {
   gl.bindVertexArray(waterVao);
   gl.drawElements(gl.TRIANGLES, waterVertCount, gl.UNSIGNED_SHORT, 0);
 
-  // Trees (trunk, then swaying foliage)
+  // Trees (each variant is its own instanced draw)
   gl.useProgram(treeProg.program);
   gl.uniformMatrix4fv(treeProg.u.uProj, false, proj);
   gl.uniformMatrix4fv(treeProg.u.uView, false, view);
@@ -1565,12 +1711,10 @@ function frame(now) {
   gl.uniform3fv(treeProg.u.uSunDir, SUN_DIR);
   gl.uniform3fv(treeProg.u.uFogColor, FOG_COLOR);
   gl.uniform1f(treeProg.u.uTime, time);
-  gl.uniform1f(treeProg.u.uSwayAmount, 0.0);
-  gl.bindVertexArray(trunkVao.vao);
-  gl.drawArraysInstanced(gl.TRIANGLES, 0, trunkVao.vertCount, treeCount);
-  gl.uniform1f(treeProg.u.uSwayAmount, 1.0);
-  gl.bindVertexArray(foliageVao.vao);
-  gl.drawArraysInstanced(gl.TRIANGLES, 0, foliageVao.vertCount, treeCount);
+  for (const tv of treeVaos) {
+    gl.bindVertexArray(tv.vao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, tv.vertCount, tv.instCount);
+  }
 
   // Bridge + railway track
   gl.useProgram(propProg.program);
