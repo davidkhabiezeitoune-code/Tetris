@@ -57,45 +57,14 @@ To access it from everyone's phone, either:
 
 - **Live read** from the Sheet — polls every ~30s, no login.
 - Charts: settle time per session, average settle time by type, who settles
-  which events, night wake-ups by day, typical time of day per event type,
-  common settling techniques (extracted from the "how he settled" text).
+  which events, night wake-ups by day, common settling techniques (extracted
+  from the "how he settled" text).
 - KPI tiles: sessions logged, average settle time, night wake-ups in the last
   7 days, most active carer.
 - Filter by date range, event type, carer, or free-text search.
 - Sortable session table.
 - CSV export of the parsed data.
 - Light/dark theme (follows system, or toggle manually).
-- **AI Insights tab** — sends a summary of the log directly to Claude
-  (Anthropic's AI) from the browser and shows back patterns and suggestions.
-
-### AI Insights — how it works, and the tradeoff
-
-This is the one feature that isn't purely read-only: generating insights
-makes an outbound API call. Since there's no backend, it uses **your own
-Anthropic API key**, entered once on the Insights tab and stored only in
-that browser's `localStorage`.
-
-Browsers can't call `api.anthropic.com` directly — it doesn't return the
-CORS headers a cross-origin `fetch()` needs, so the request has to go
-through a tiny relay first. `cloudflare-worker.js` in this folder is that
-relay: a stateless pass-through that reads the API key off each request and
-forwards it straight to Anthropic, storing nothing itself. It's about the
-smallest thing that can sit in the middle.
-
-**One-time setup (a couple of minutes, easiest on a laptop):**
-
-1. Sign up free at [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) — no credit card needed.
-2. In the dashboard: **Workers & Pages** → **Create** → **Create Worker**. Give it any name (e.g. `sleep-tracker-relay`) and click **Deploy** to create the default worker.
-3. Click **Edit code**, delete the placeholder content, and paste in the contents of `cloudflare-worker.js` from this folder. Click **Save and deploy**.
-4. Copy the worker's URL — it looks like `https://sleep-tracker-relay.<your-subdomain>.workers.dev`.
-5. Open the app's **Insights** tab, paste that URL into **Relay URL**, paste your Anthropic API key into **Anthropic API key** (get one at [console.anthropic.com](https://console.anthropic.com/settings/keys)), and tap **Save & continue**.
-
-Both values are saved only in that browser's `localStorage` — the key is
-visible in that page's network requests (to the relay, and from the relay
-on to Anthropic), since there's no backend of the app's own to hide it
-behind. This is a deliberate tradeoff, acceptable specifically because this
-app is only ever shared as a private link with people you trust — don't
-reuse this pattern for anything public.
 
 ## Limitations
 
