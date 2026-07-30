@@ -758,7 +758,7 @@ const GRID_N = 120;
 function rand(a, b) { return a + Math.random() * (b - a); }
 function lerp(a, b, t) { return a + t * (b - a); }
 
-let terrainVao, terrainIndexCount;
+let terrainVao, terrainIndexCount, terrainPositions;
 {
   const verts = (GRID_N + 1) * (GRID_N + 1);
   const positions = new Float32Array(verts * 3);
@@ -824,6 +824,34 @@ let terrainVao, terrainIndexCount;
   const idxBuf = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+  terrainPositions = positions;
+}
+
+// Samples ground height by linearly interpolating the *actual rendered*
+// terrain triangle under (x,z) — using the same grid + diagonal split as the
+// mesh above — instead of the raw analytic heightAt(). Near sharply-curved
+// features (like the lake's smoothstep shore taper) heightAt() can differ
+// from what the coarse grid actually renders, which made grass placed via
+// heightAt() appear to float above (or sink into) the ground right at the
+// shore. Placing props via this function guarantees they sit exactly on the
+// visible surface, regardless of grid resolution or curve sharpness.
+function terrainHeightSampled(x, z) {
+  const cell = (WORLD_HALF * 2) / GRID_N;
+  const gx = (x + WORLD_HALF) / cell, gz = (z + WORLD_HALF) / cell;
+  const ix = Math.max(0, Math.min(GRID_N - 1, Math.floor(gx)));
+  const iz = Math.max(0, Math.min(GRID_N - 1, Math.floor(gz)));
+  const fx = gx - ix, fz = gz - iz;
+  const stride = GRID_N + 1;
+  const ha = terrainPositions[(iz*stride + ix) * 3 + 1];
+  const hb = terrainPositions[(iz*stride + ix + 1) * 3 + 1];
+  const hc = terrainPositions[((iz+1)*stride + ix) * 3 + 1];
+  const hd = terrainPositions[((iz+1)*stride + ix + 1) * 3 + 1];
+  if (fx + fz <= 1) {
+    return ha + (hb - ha) * fx + (hc - ha) * fz;
+  }
+  const gx2 = 1 - fx, gz2 = 1 - fz;
+  return hd + (hb - hd) * gz2 + (hc - hd) * gx2;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -859,7 +887,7 @@ let grassVao, grassCount;
     const edgeFade = 1 - smoothstepJS(GRASS_RADIUS * 0.3, GRASS_RADIUS, r);
     if (Math.random() > edgeFade) continue;
     if (blockedByLakeOrTrack(x, z)) continue;
-    instPos[n*3] = x; instPos[n*3+1] = heightAt(x, z); instPos[n*3+2] = z;
+    instPos[n*3] = x; instPos[n*3+1] = terrainHeightSampled(x, z); instPos[n*3+2] = z;
     instData[n*4]   = rand(0.55, 1.15) * (0.35 + 0.65*edgeFade); // scale
     instData[n*4+1] = Math.random() * Math.PI * 2;             // rotation
     instData[n*4+2] = Math.random();                            // colorT
@@ -914,7 +942,7 @@ let flowerVao;
       const a = Math.random() * Math.PI * 2;
       x = Math.cos(a) * r; z = Math.sin(a) * r;
     } while (blockedByLakeOrTrack(x, z));
-    instPos[i*3] = x; instPos[i*3+1] = heightAt(x, z) + 0.12; instPos[i*3+2] = z;
+    instPos[i*3] = x; instPos[i*3+1] = terrainHeightSampled(x, z) + 0.12; instPos[i*3+2] = z;
     instData[i*4]   = rand(0.05, 0.09);
     instData[i*4+1] = Math.random() < 0.5 ? 1 : 0;
     instData[i*4+2] = Math.random() * 100;
@@ -1179,7 +1207,7 @@ let treeCount, treeVaos;
     const t = smoothstepJS(0.55, 1.6, scale);
     const swayMul = lerp(2.4, 0.35, t);
     const b = buckets[variant];
-    b.instPos.push(x, heightAt(x, z), z);
+    b.instPos.push(x, terrainHeightSampled(x, z), z);
     b.instData.push(scale, Math.random() * Math.PI * 2, Math.random() * 100, swayMul);
     n++;
   }
